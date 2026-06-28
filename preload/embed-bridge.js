@@ -56,6 +56,79 @@ contextBridge.exposeInMainWorld('chrome', {
   document.head.appendChild(s);
 })();
 
+// ── Ad-blocking: inject kill script into PAGE context ─────────
+(function injectAdBlocker() {
+  var killScript = document.createElement('script');
+  killScript.textContent = '(' + function() {
+    'use strict';
+    window.open = function() { return null; };
+
+    var _formSubmit = HTMLFormElement.prototype.submit;
+    HTMLFormElement.prototype.submit = function() {
+      if (this.target === '_blank' || this.target === '_new') return;
+      return _formSubmit.call(this);
+    };
+    var _requestSubmit = HTMLFormElement.prototype.requestSubmit;
+    if (_requestSubmit) {
+      HTMLFormElement.prototype.requestSubmit = function() {
+        if (this.target === '_blank' || this.target === '_new') return;
+        return _requestSubmit.apply(this, arguments);
+      };
+    }
+
+    document.addEventListener('click', function(e) {
+      var a = e.target.closest('a');
+      if (a && (a.target === '_blank' || a.target === '_new')) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    }, true);
+
+    var _createElement = document.createElement.bind(document);
+    document.createElement = function(tag, options) {
+      var el = _createElement(tag, options);
+      if (tag && tag.toLowerCase() === 'a') {
+        el.addEventListener('click', function(e) {
+          if (el.target === '_blank' || el.target === '_new') {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      }
+      return el;
+    };
+
+    new MutationObserver(function(mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var added = mutations[i].addedNodes;
+        for (var j = 0; j < added.length; j++) {
+          var node = added[j];
+          if (node.nodeType !== 1) continue;
+          if (node.tagName === 'A' && (node.target === '_blank' || node.target === '_new')) {
+            node.target = '_self';
+          }
+          if (node.querySelectorAll) {
+            var anchors = node.querySelectorAll('a[target="_blank"], a[target="_new"]');
+            for (var k = 0; k < anchors.length; k++) {
+              anchors[k].target = '_self';
+            }
+          }
+        }
+      }
+    }).observe(document.documentElement, { childList: true, subtree: true });
+
+    var anchors = document.querySelectorAll('a[target="_blank"], a[target="_new"]');
+    for (var i = 0; i < anchors.length; i++) {
+      anchors[i].target = '_self';
+    }
+  } + ')();';
+
+  (document.head || document.documentElement).insertBefore(
+    killScript,
+    (document.head || document.documentElement).firstChild
+  );
+})();
+
 // ── Content Script ────────────────────────────────────────────
 // Direct port of ReelVault content.js — identical logic, Electron IPC storage.
 

@@ -350,6 +350,11 @@ ipcMain.handle('open-embed', (_event, url) => {
 
   embedWin.loadURL(url);
 
+  // Block ALL popups from player windows — no ads, no popups.
+  embedWin.webContents.setWindowOpenHandler(() => {
+    return { action: 'deny' };
+  });
+
   embedWin.on('closed', () => {
     embedWindows.delete(url);
   });
@@ -472,6 +477,12 @@ function createMainWindow() {
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'popup.html'));
 
+  // Block ALL popups from the main window — embed windows are
+  // only opened via the open-embed IPC handler.
+  mainWindow.webContents.setWindowOpenHandler(() => {
+    return { action: 'deny' };
+  });
+
   mainWindow.on('resize', () => saveWindowState(mainWindow));
   mainWindow.on('move', () => saveWindowState(mainWindow));
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -483,6 +494,24 @@ app.whenReady().then(() => {
   buildMenu();
   createMainWindow();
   startWatchlistTimer();
+
+  // Global safety net: close any untracked window immediately.
+  // Only the main window and embed windows (opened via open-embed IPC)
+  // are allowed to exist. Ads sometimes find ways to spawn windows
+  // that bypass per-webContents handlers.
+  app.on('browser-window-created', (_event, win) => {
+    // Give the window a moment to be registered by open-embed
+    setImmediate(() => {
+      if (win === mainWindow) return;
+      let found = false;
+      for (const [url, ew] of embedWindows) {
+        if (ew === win) { found = true; break; }
+      }
+      if (!found && !win.isDestroyed()) {
+        win.close();
+      }
+    });
+  });
 
   // System tray (optional — can be disabled from settings)
   try {
