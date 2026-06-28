@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ReelVault</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+<div class="app">
+  <!-- ═══════════ HEADER ═══════════════════════════════════ -->
+  <header>
+    <div class="header-icon">▶</div>
+    <h1>ReelVault</h1>
+  </header>
+
+  <!-- ═══════════ TAB BAR ═══════════════════════════════════ -->
+  <nav class="tab-bar">
+    <button class="tab-btn" data-tab="schemas">Providers</button>
+    <button class="tab-btn active" data-tab="bookmarks">Bookmarks</button>
+    <button class="tab-btn" data-tab="watchlist">Watchlist</button>
+    <button class="tab-btn" data-tab="history">History</button>
+  </nav>
+
+  <!-- ═══════════ TAB 1: Providers ══════════════════════════ -->
+  <section id="tab-schemas" class="tab-panel">
+    <input type="text" id="schema-search" placeholder="Filter providers…" class="tab-search">
+    <div id="schemas-list" class="item-list"></div>
+    <p id="no-schemas" class="empty-msg">Loading providers…</p>
+  </section>
+
+  <!-- ═══════════ TAB 2: Bookmarks ═════════════════════════ -->
+  <section id="tab-bookmarks" class="tab-panel active">
+    <button id="bm-toggle-btn" class="btn-toggle">+ Add Bookmark</button>
+
+    <div id="bm-form-wrap" class="form-section" style="display:none">
+      <!-- Step 1: Search -->
+      <div id="bm-step-search">
+        <input type="text" id="bm-search" placeholder="Search IMDB (e.g. Breaking Bad)">
+        <div id="bm-search-status" class="search-status"></div>
+        <div id="bm-search-results" class="item-list"></div>
+      </div>
+
+      <!-- Step 2: Season/Episode (TV only) -->
+      <div id="bm-step-season" style="display:none">
+        <div class="hint" id="bm-pick-hint"></div>
+        <div class="key-row">
+          <input type="number" id="bm-season" placeholder="Season" class="half" min="1" value="1">
+          <input type="number" id="bm-episode" placeholder="Episode" class="half" min="1" value="1">
+        </div>
+        <div class="form-actions">
+          <button id="bm-confirm-btn" class="btn-primary">Add Bookmark</button>
+          <button id="bm-back-btn" class="btn-secondary">Back</button>
+        </div>
+      </div>
+
+      <button id="bm-cancel-btn" class="btn-secondary" style="width:100%">Cancel</button>
+    </div>
+
+    <div id="bm-filter-bar" class="bm-filter-bar" style="display:none">
+      <button class="bm-filter-btn active" data-filter="all">All</button>
+      <button class="bm-filter-btn" data-filter="tv">📺 TV</button>
+      <button class="bm-filter-btn" data-filter="movie">🎬 Movies</button>
+    </div>
+
+    <input type="text" id="bm-filter-search" placeholder="Filter bookmarks…" class="tab-search">
+
+    <div id="bookmarks-list" class="item-list"></div>
+    <p id="no-bookmarks" class="empty-msg">No bookmarks yet — search to add your first</p>
+  </section>
+
+  <!-- ═══════════ TAB 3: Watchlist ═══════════════════════════ -->
+  <section id="tab-watchlist" class="tab-panel">
+    <div class="wl-header-row">
+      <button id="wl-toggle-btn" class="btn-toggle">+ Track a Series</button>
+      <span id="wl-sync-status" class="wl-sync-status"></span>
+      <button id="wl-check-all-btn" class="wl-reload-btn" title="Check all series now">↻</button>
+    </div>
+
+    <input type="text" id="wl-filter-search" placeholder="Filter watchlist…" class="tab-search">
+
+    <!-- Custom series search form -->
+    <div id="wl-form-wrap" class="form-section" style="display:none">
+      <input type="text" id="wl-search" placeholder="Search TVmaze (e.g. Severance)">
+      <div id="wl-search-status" class="search-status"></div>
+      <div id="wl-search-results" class="item-list"></div>
+      <button id="wl-cancel-btn" class="btn-secondary" style="width:100%">Cancel</button>
+    </div>
+
+    <div id="watchlist-items" class="item-list"></div>
+    <p id="no-watchlist" class="empty-msg">No series tracked. Search to add a TV show.</p>
+  </section>
+
+  <!-- ═══════════ TAB 4: History ═══════════════════════════ -->
+  <section id="tab-history" class="tab-panel">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <input type="text" id="hist-search" placeholder="Search history…" style="flex:1">
+      <button id="hist-clear-btn" class="btn-secondary" style="font-size:10px;padding:4px 10px;flex-shrink:0">Clear</button>
+    </div>
+    <div id="history-list" class="item-list"></div>
+    <p id="no-history" class="empty-msg">Nothing watched yet. Watch a bookmarked show for at least 1 minute to record it here.</p>
+  </section>
+</div>
+
+<script src="models.js"></script>
+<script src="parser.js"></script>
+<script src="provider-parser.js"></script>
+<script src="storage.js"></script>
+<script src="availability.js"></script>
+<script src="watchlist.js"></script>
+<script src="popup-ui.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+[
+  {"id":"vidsrc-me","name":"VidSrc Me","rootUrl":"https://vidsrcme.ru/embed/","tv":{"urlTemplate":"{rootUrl}tv?imdb={imdb}&season={season}&episode={episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidsrc-to","name":"VidSrc To","rootUrl":"https://vidsrc.to/embed/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidsrc-in","name":"VidSrc In","rootUrl":"https://vidsrc.in/embed/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidsrc-cc","name":"VidSrc CC","rootUrl":"https://vidsrc.cc/v2/embed/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidsrc-pm","name":"VidSrc PM","rootUrl":"https://vidsrc.pm/embed/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidsrc-me-su","name":"VidSrc Me SU","rootUrl":"https://vidsrcme.su/embed/","tv":{"urlTemplate":"{rootUrl}tv?imdb={imdb}&season={season}&episode={episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidsrc-embed","name":"VidSrc Embed","rootUrl":"https://vidsrc-embed.ru/embed/","tv":{"urlTemplate":"{rootUrl}tv?imdb={imdb}&season={season}&episode={episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidfast","name":"VidFast","rootUrl":"https://vidfast.pro/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidlink","name":"VidLink","rootUrl":"https://vidlink.pro/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidbinge","name":"VidBinge","rootUrl":"https://vidbinge.to/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"core"},
+  {"id":"vidflix","name":"VidFlix","rootUrl":"https://vidflix.club/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
+  {"id":"vidrock","name":"VidRock","rootUrl":"https://vidrock.ru/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
+  {"id":"vidlux","name":"VidLux","rootUrl":"https://vidlux.xyz/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
+  {"id":"vidcore","name":"VidCore","rootUrl":"https://www.vidcore.net/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
+  {"id":"multiembed","name":"SuperEmbed","rootUrl":"https://multiembed.mov/","tv":{"urlTemplate":"{rootUrl}?video_id={imdb}&s={season}&e={episode}"},"movie":{"urlTemplate":"{rootUrl}?video_id={imdb}"},"tier":"extras"},
+  {"id":"nontongo","name":"Nontongo","rootUrl":"https://www.nontongo.win/embed/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
+  {"id":"moviesapi","name":"MoviesAPI","rootUrl":"https://moviesapi.to/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
+  {"id":"cinemaos","name":"CinemaOS","rootUrl":"https://cinemaos.tech/player","tv":{"urlTemplate":"{rootUrl}{tmdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}{imdb}"},"tier":"extras"},
+  {"id":"screenscape","name":"ScreenScape","rootUrl":"https://screenscape.me/embed","tv":{"urlTemplate":"{rootUrl}?type=tv&imdb={imdb}&s={season}&e={episode}"},"movie":{"urlTemplate":"{rootUrl}?type=movie&imdb={imdb}"},"tier":"extras"},
+  {"id":"autoembed","name":"AutoEmbed","rootUrl":"https://autoembed.co/","tv":{"urlTemplate":"{rootUrl}tv/tmdb/{tmdb}-{season}-{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/tmdb/{tmdb}"},"tier":"extras"},
+  {"id":"autoembed-imdb","name":"AutoEmbed IMDB","rootUrl":"https://autoembed.co/","tv":{"urlTemplate":"{rootUrl}tv/imdb/{imdb}-{season}-{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/imdb/{imdb}"},"tier":"extras"}
+]

@@ -1,0 +1,51 @@
+{
+  "name": "watchthemall",
+  "version": "1.0.0",
+  "description": "Cross-platform desktop app for navigating video embed pages, bookmarking series, and tracking new episode releases.",
+  "main": "main.js",
+  "scripts": {
+    "start": "npx electron .",
+    "build": "python3 scripts/build.py all",
+    "dist": "npx electron-builder",
+    "dist:linux": "npx electron-builder --linux",
+    "dist:win": "npx electron-builder --win",
+    "dist:mac": "npx electron-builder --mac"
+  },
+  "build": {
+    "appId": "dev.predixcode.watchthemall",
+    "productName": "WatchThemAll",
+    "directories": {
+      "output": "dist-packages"
+    },
+    "files": [
+      "main.js",
+      "preload/**",
+      "src/**",
+      "icons/**",
+      "node_modules/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Video"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.entertainment"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^42.5.0",
+    "electron-builder": "^26.15.3"
+  }
+}
