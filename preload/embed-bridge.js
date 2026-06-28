@@ -1,43 +1,42 @@
 /**
  * WatchThemAll — Embed Bridge (player window preload)
  *
- * Runs in every embed BrowserWindow. Injects:
- * 1. Edge navigation buttons (prev/next episode, prev/next season)
- * 2. Watch progress tracking (updates bookmark.lastSeason/lastEpisode)
- * 3. Watch history recording (10s minimum, dedup, status tracking)
- * 4. Fullscreen-aware visibility
+ * Direct 1:1 port of ReelVault content.js for Electron.
+ * Every feature preserved:
+ *   - 5-strategy URL parsing (query, tt-path, hybrid, hyphen, suffix)
+ *   - Episode-data-aware buttons (TVmaze fetch, cache-first, real episode bounds)
+ *   - Dual-ID bookmark matching (IMDB + TMDB)
+ *   - Watch progress tracking with proper query key reuse
+ *   - Watch history recording (10s minimum, dedup, retry, status tracking)
+ *   - Fullscreen detection with CSS class toggling
+ *   - 200ms throttled MutationObserver for SPA DOM replacement
  *
- * All DOM manipulation runs directly in the preload context.
- * Storage goes through IPC to the main process.
- *
- * This is a direct port of the ReelVault content.js, adapted
- * for Electron's preload model.
+ * Storage calls go through IPC to the main process instead of
+ * chrome.storage.local. Everything else is identical DOM logic.
  */
 
 const { contextBridge, ipcRenderer } = require('electron');
 
 // ── Storage helpers (preload scope — direct IPC) ──────────────
-// Wrapped in try/catch so storage failures don't break the page.
+// Wraps ipcRenderer.invoke to match chrome.storage.local API.
+// Returns empty/defaults on failure so the page never breaks.
 
-async function storageGet(keys) {
-  try {
-    return await ipcRenderer.invoke('storage:get', keys);
-  } catch (err) {
-    console.error('WTA embed: storageGet failed:', err.message);
-    return keys; // return defaults on failure
-  }
-}
-
-async function storageSet(obj) {
-  try {
-    return await ipcRenderer.invoke('storage:set', obj);
-  } catch (err) {
-    console.error('WTA embed: storageSet failed:', err.message);
-  }
-}
+const S = {
+  async get(keys) {
+    try {
+      return await ipcRenderer.invoke('storage:get', keys);
+    } catch (_) {
+      return {};
+    }
+  },
+  async set(obj) {
+    try {
+      await ipcRenderer.invoke('storage:set', obj);
+    } catch (_) { /* non-critical */ }
+  },
+};
 
 // ── Expose chrome.storage.local to the page world ─────────────
-// So page scripts can access storage if needed.
 contextBridge.exposeInMainWorld('chrome', {
   storage: {
     local: {
@@ -50,64 +49,22 @@ contextBridge.exposeInMainWorld('chrome', {
   },
 });
 
-// ── Inject CSS ────────────────────────────────────────────────
-// Matches the ReelVault content.css — glass-morphism buttons,
-// fullscreen hiding, responsive positioning.
-
-(function injectCSS() {
-  const style = document.createElement('style');
-  style.textContent = `
-    /* WatchThemAll — Edge Navigation Buttons */
-    .wta-nav-btn {
-      position: fixed !important;
-      z-index: 2147483647 !important;
-      min-width: 60px !important;
-      height: 34px !important;
-      padding: 4px 10px !important;
-      background: rgba(15, 15, 25, 0.65) !important;
-      backdrop-filter: blur(12px) saturate(140%) !important;
-      -webkit-backdrop-filter: blur(12px) saturate(140%) !important;
-      border: 1px solid rgba(255, 255, 255, 0.08) !important;
-      border-radius: 10px !important;
-      color: #ededf5 !important;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif !important;
-      font-size: 12px !important;
-      font-weight: 600 !important;
-      cursor: pointer !important;
-      opacity: 0.35 !important;
-      margin: 0 !important;
-      transition: opacity 180ms ease, background 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 150ms ease !important;
-      -webkit-appearance: none !important;
-      appearance: none !important;
-      outline: none !important;
-    }
-    .wta-nav-btn:hover {
-      opacity: 1 !important;
-      background: rgba(15, 15, 25, 0.88) !important;
-      border-color: rgba(255, 255, 255, 0.16) !important;
-      box-shadow: 0 0 18px rgba(255,255,255,0.05), 0 0 40px rgba(99, 102, 241, 0.08) !important;
-    }
-    .wta-nav-btn:active {
-      transform: scale(0.94) !important;
-    }
-    /* Hide buttons in fullscreen */
-    .wta-nav-btn.wta-fullscreen-hidden {
-      opacity: 0 !important;
-      pointer-events: none !important;
-    }
-  `;
-  document.head.appendChild(style);
+// ── Inject content.css (exact ReelVault button styling) ───────
+(function () {
+  const s = document.createElement('style');
+  s.textContent = '.vidsrc-nav-btn{position:fixed;z-index:2147483647;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:6px;background:rgba(15,15,25,0.62);backdrop-filter:blur(14px) saturate(140%);-webkit-backdrop-filter:blur(14px) saturate(140%);border:1px solid rgba(255,255,255,0.07);border-radius:10px;cursor:pointer;user-select:none;-webkit-user-select:none;opacity:0.32;transition:opacity 200ms cubic-bezier(0.16,1,0.3,1),background 200ms cubic-bezier(0.16,1,0.3,1),border-color 200ms ease,box-shadow 200ms ease,transform 160ms cubic-bezier(0.16,1,0.3,1)}.vidsrc-nav-btn:hover{opacity:1;background:rgba(12,12,22,0.90);border-color:rgba(255,255,255,0.15);box-shadow:0 0 20px rgba(0,0,0,0.4),0 0 40px rgba(99,102,241,0.06);transform:scale(1.03)}.vidsrc-nav-btn:active{transform:scale(0.95)}.vidsrc-nav-btn.vidsrc-nav-hidden{opacity:0!important;pointer-events:none!important;transition:opacity 100ms ease}.vidsrc-nav-arrow{font-size:15px;line-height:1;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.5);transition:transform 150ms cubic-bezier(0.16,1,0.3,1)}.vidsrc-nav-btn:hover .vidsrc-nav-arrow{transform:scale(1.10)}.vidsrc-nav-label{font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;font-size:10.5px;font-weight:600;color:rgba(255,255,255,0.80);letter-spacing:0.3px;white-space:nowrap;transition:color 150ms ease}.vidsrc-nav-btn:hover .vidsrc-nav-label{color:rgba(255,255,255,0.96)}#vidsrc-prev-ep,#vidsrc-next-ep{width:auto;min-width:60px;height:34px;padding:4px 10px;flex-direction:row;gap:6px;border-radius:10px}#vidsrc-prev-ep .vidsrc-nav-arrow,#vidsrc-next-ep .vidsrc-nav-arrow{font-size:15px}#vidsrc-prev-season,#vidsrc-next-season{width:auto;min-width:96px;height:32px;padding:4px 12px;flex-direction:row;gap:7px;border-radius:10px}#vidsrc-prev-season .vidsrc-nav-arrow,#vidsrc-next-season .vidsrc-nav-arrow{font-size:13px}';
+  document.head.appendChild(s);
 })();
 
 // ── Content Script ────────────────────────────────────────────
-// Runs immediately in the preload context.
+// Direct port of ReelVault content.js — identical logic, Electron IPC storage.
 
 (async function () {
   'use strict';
 
   const url = new URL(window.location.href);
 
-  /* ── URL parsing ──────────────────────────────────────────── */
+  /* ── URL parsing (5 strategies) ────────────────────────────── */
   function tryParse(parser) {
     const r = parser();
     return (r && r.parsedId) ? r : null;
@@ -134,57 +91,46 @@ contextBridge.exposeInMainWorld('chrome', {
     return { parsedId: parts[idx], season: parseInt(parts[idx+1]), episode: parseInt(parts[idx+2]), navMode: 'path', parts, idx };
   }
 
+  function parseHybridQueryValue() {
+    for (const [key, val] of url.searchParams) {
+      const m = val.match(/^(\w+)\/(\d+)\/(\d+)$/);
+      if (m) return { parsedId: m[1], season: parseInt(m[2]), episode: parseInt(m[3]), navMode: 'hybrid', paramKey: key };
+    }
+    return null;
+  }
+
   function parseSuffixPath() {
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts.length < 2) return null;
     if (parts.length >= 3) {
-      const s = parseInt(parts[parts.length-2]);
-      const e = parseInt(parts[parts.length-1]);
-      if (!isNaN(s) && !isNaN(e)) {
-        return { parsedId: parts[parts.length-3], season: s, episode: e, navMode: 'suffix', parts, idx: parts.length - 3 };
-      }
+      const s = parseInt(parts[parts.length-2]), e = parseInt(parts[parts.length-1]);
+      if (!isNaN(s) && !isNaN(e)) return { parsedId: parts[parts.length-3], season: s, episode: e, navMode: 'path', parts, idx: parts.length - 3 };
     }
     const id = parts[parts.length-1];
-    if (id && id.length >= 4) return { parsedId: id, season: null, episode: null, navMode: 'suffix' };
+    if (id && (/^tt\d{7,}$/.test(id) || (/^\d+$/.test(id) && parts.length >= 2)))
+      return { parsedId: id, season: null, episode: null, navMode: 'path' };
     return null;
   }
 
-  function parseHybridQuery() {
-    for (const [, val] of url.searchParams) {
-      const parts = val.split('/');
-      if (parts.length === 3 && !isNaN(parseInt(parts[1])) && !isNaN(parseInt(parts[2]))) {
-        return { parsedId: parts[0], season: parseInt(parts[1]), episode: parseInt(parts[2]), navMode: 'hybrid' };
-      }
-    }
-    return null;
-  }
-
-  function parseHyphenPath() {
+  function parseHyphenatedPath() {
     const parts = url.pathname.split('/').filter(Boolean);
-    if (!parts.length) return null;
-    const last = parts[parts.length-1];
-    const m = last.match(/^(tt\d{7,}|\d+)-(\d+)-(\d+)$/);
+    if (parts.length < 2) return null;
+    const m = parts[parts.length-1].match(/^(tt\d{7,}|\d+)-(\d+)-(\d+)$/);
     if (!m) return null;
-    const id = m[1];
-    const season = parseInt(m[2]);
-    const episode = parseInt(m[3]);
-    if (!/^tt\d{7,}$/.test(id) && !/^\d+$/.test(id)) return null;
-    return { parsedId: id, season, episode, navMode: 'hyphen', parts, idx: parts.length - 1 };
+    return { parsedId: m[1], season: parseInt(m[2]), episode: parseInt(m[3]), navMode: 'hyphen', parts, idx: parts.length - 1 };
   }
 
-  const parsed = tryParse(parseQueryParams)
-    || tryParse(parseTtPath)
-    || tryParse(parseHybridQuery)
-    || tryParse(parseHyphenPath)
-    || tryParse(parseSuffixPath);
+  const parsed = tryParse(parseQueryParams) || tryParse(parseTtPath)
+    || tryParse(parseHybridQueryValue) || tryParse(parseHyphenatedPath) || tryParse(parseSuffixPath);
+  if (!parsed) return;
 
-  if (!parsed) return; // Not an embed page — exit silently
+  const { parsedId, season, episode, navMode } = parsed;
+  const isMovie = season === null || episode === null || isNaN(season) || isNaN(episode);
+  const state = { season: season || 0, episode: episode || 0, fullscreen: false };
 
-  const { parsedId, season, episode, navMode, parts, idx } = parsed;
-  const isMovie = season === null || isNaN(season);
-
-  /* ── Bookmark lookup ──────────────────────────────────────── */
+  /* ── Bookmark lookup (multi-field match) ──────────────────── */
   function findBookmark(bookmarks, id) {
+    if (!bookmarks || !bookmarks.length) return null;
     let bm = bookmarks.find(b => b.imdb === id || b.tmdbId === id);
     if (bm) return bm;
     if (/^\d+$/.test(id)) {
@@ -194,206 +140,74 @@ contextBridge.exposeInMainWorld('chrome', {
     return null;
   }
 
-  /* ── Load bookmarks ───────────────────────────────────────── */
-  const data = await storageGet({
-    vidsrc_bookmarks: [],
-    vidsrc_history: [],
-  });
+  /* ── Bookmark tracking (immediate, awaited) ───────────────── */
+  let trackedBookmark = null;
 
-  const bookmarks = data.vidsrc_bookmarks || [];
-  let history = data.vidsrc_history || [];
-  let trackedBookmark = findBookmark(bookmarks, parsedId);
-
-  /* ── Build navigation URL ─────────────────────────────────── */
-  function buildNavUrl(navSeason, navEpisode) {
-    if (navMode === 'path' && parts && idx !== undefined) {
-      const p = [...parts];
-      p[idx+1] = String(navSeason);
-      p[idx+2] = String(navEpisode);
-      return url.origin + '/' + p.join('/') + url.search + url.hash;
-    }
-    if (navMode === 'suffix' && parts && idx !== undefined) {
-      const p = [...parts];
-      p[idx+1] = String(navSeason);
-      p[idx+2] = String(navEpisode);
-      return url.origin + '/' + p.join('/') + url.search + url.hash;
-    }
-    if (navMode === 'hyphen' && parts && idx !== undefined) {
-      const p = [...parts];
-      const idPart = p[idx].split('-')[0];
-      p[idx] = `${idPart}-${navSeason}-${navEpisode}`;
-      return url.origin + '/' + p.join('/') + url.search + url.hash;
-    }
-    if (navMode === 'query') {
-      const newUrl = new URL(url);
-      newUrl.searchParams.set('season', navSeason);
-      newUrl.searchParams.set('episode', navEpisode);
-      return newUrl.href;
-    }
-    return url.href;
-  }
-
-  function navigateTo(navSeason, navEpisode) {
-    if (!trackedBookmark) return;
-    const dest = buildNavUrl(navSeason, navEpisode);
-    location.assign(dest);
-  }
-
-  /* ── Create DOM buttons ───────────────────────────────────── */
-  function createButton(id, text, cssProps) {
-    if (document.getElementById(id)) return document.getElementById(id);
-    const btn = document.createElement('button');
-    btn.id = id;
-    btn.className = 'wta-nav-btn';
-    btn.textContent = text;
-    Object.assign(btn.style, cssProps);
-    btn.addEventListener('mouseenter', () => {
-      btn.style.opacity = '1';
-      btn.style.background = 'rgba(15, 15, 25, 0.88)';
-      btn.style.borderColor = 'rgba(255, 255, 255, 0.16)';
-      btn.style.boxShadow = '0 0 18px rgba(255,255,255,0.05), 0 0 40px rgba(99, 102, 241, 0.08)';
-    });
-    btn.addEventListener('mouseleave', () => {
-      if (btn.classList.contains('wta-fullscreen-hidden')) return;
-      btn.style.opacity = '0.35';
-      btn.style.background = 'rgba(15, 15, 25, 0.65)';
-      btn.style.borderColor = 'rgba(255, 255, 255, 0.08)';
-      btn.style.boxShadow = 'none';
-    });
-    btn.addEventListener('mousedown', () => { btn.style.transform = 'scale(0.94)'; });
-    btn.addEventListener('mouseup', () => { btn.style.transform = 'scale(1)'; });
-    document.body.appendChild(btn);
-    return btn;
-  }
-
-  /* ── Fullscreen detection ─────────────────────────────────── */
-  function isFullscreen() {
-    return !!(document.fullscreenElement
-      || document.webkitFullscreenElement
-      || document['mozFullScreenElement']);
-  }
-
-  function updateButtonVisibility() {
-    const hidden = isFullscreen();
-    ['wta-prev-ep', 'wta-next-ep', 'wta-prev-season', 'wta-next-season'].forEach(id => {
-      const btn = document.getElementById(id);
-      if (btn) {
-        if (hidden) {
-          btn.classList.add('wta-fullscreen-hidden');
-        } else {
-          btn.classList.remove('wta-fullscreen-hidden');
-          btn.style.opacity = '0.35';
-          btn.style.pointerEvents = 'auto';
+  if (!isMovie) {
+    try {
+      const data = await S.get({ vidsrc_bookmarks: [] });
+      const bm = findBookmark(data.vidsrc_bookmarks, parsedId);
+      if (bm && bm.type === 'tv') {
+        trackedBookmark = bm;
+        if (bm.lastSeason !== season || bm.lastEpisode !== episode) {
+          bm.lastSeason = season;
+          bm.lastEpisode = episode;
+          await S.set({ vidsrc_bookmarks: data.vidsrc_bookmarks });
         }
       }
-    });
-  }
-
-  /* ── Build buttons ────────────────────────────────────────── */
-  function buildButtons() {
-    if (document.getElementById('wta-next-ep')) return;
-    if (!trackedBookmark || trackedBookmark.type !== 'tv') return;
-
-    const shared = {
-      position: 'fixed',
-      zIndex: '2147483647',
-      minWidth: '60px',
-      height: '34px',
-      padding: '4px 10px',
-    };
-
-    createButton('wta-prev-ep', '\u25C0\uFE0E Ep', {
-      ...shared, left: '4px', top: '50%', marginTop: '-17px',
-    }).addEventListener('click', () => {
-      const s = season || trackedBookmark.lastSeason || 1;
-      const e = (episode || trackedBookmark.lastEpisode || 1) - 1;
-      if (e > 0) navigateTo(s, e);
-    });
-
-    createButton('wta-next-ep', 'Ep \u25B6\uFE0E', {
-      ...shared, right: '4px', top: '50%', marginTop: '-17px',
-    }).addEventListener('click', () => {
-      const s = season || trackedBookmark.lastSeason || 1;
-      const e = (episode || trackedBookmark.lastEpisode || 1) + 1;
-      navigateTo(s, e);
-    });
-
-    createButton('wta-prev-season', '\u25B2\uFE0E S', {
-      ...shared, left: '4px', top: '50%', marginTop: '25px',
-    }).addEventListener('click', () => {
-      const s = (season || trackedBookmark.lastSeason || 1) - 1;
-      if (s > 0) navigateTo(s, 1);
-    });
-
-    createButton('wta-next-season', 'S \u25BC\uFE0E', {
-      ...shared, right: '4px', top: '50%', marginTop: '25px',
-    }).addEventListener('click', () => {
-      const s = (season || trackedBookmark.lastSeason || 1) + 1;
-      navigateTo(s, 1);
-    });
-  }
-
-  /* ── Watch tracking ───────────────────────────────────────── */
-  async function updateTracking() {
-    if (!trackedBookmark || isMovie) return;
-    const curS = season != null && !isNaN(season) ? season : null;
-    const curE = episode != null && !isNaN(episode) ? episode : null;
-    if (curS === null || curE === null) return;
-    if (trackedBookmark.lastSeason === curS && trackedBookmark.lastEpisode === curE) return;
-
-    trackedBookmark.lastSeason = curS;
-    trackedBookmark.lastEpisode = curE;
-
-    const idx = bookmarks.findIndex(b =>
-      b.imdb === trackedBookmark.imdb || b.bookmarkId === trackedBookmark.bookmarkId);
-    if (idx >= 0) {
-      bookmarks[idx].lastSeason = curS;
-      bookmarks[idx].lastEpisode = curE;
-    }
-    await storageSet({ vidsrc_bookmarks: bookmarks });
+    } catch (_) { /* non-critical */ }
   }
 
   /* ── Watch history ────────────────────────────────────────── */
-  let historyRecorded = false;
-  const MIN_WATCH_SECONDS = 10;
   const pageEntered = Date.now();
+  let historyRecorded = false;
+  let historyAttempts = 0;
+  let historyTimer = null;
 
   async function recordWatchHistory() {
     if (historyRecorded) return;
     const elapsed = Math.floor((Date.now() - pageEntered) / 1000);
-    if (elapsed < MIN_WATCH_SECONDS) return;
+    if (elapsed < 10) return;
 
-    // Re-fetch bookmarks to find the correct entry
-    const fresh = await storageGet({ vidsrc_bookmarks: [], vidsrc_history: [] });
-    const freshBookmarks = fresh.vidsrc_bookmarks || [];
-    history = fresh.vidsrc_history || [];
-    const lookupBm = findBookmark(freshBookmarks, parsedId);
-    if (!lookupBm) return;
+    historyAttempts++;
+    try {
+      const data = await S.get({ vidsrc_bookmarks: [], vidsrc_history: [] });
+      let bm = trackedBookmark;
+      if (!bm) bm = findBookmark(data.vidsrc_bookmarks, parsedId);
+      if (!bm) return;
 
-    const curS = season != null && !isNaN(season) ? season : null;
-    const curE = episode != null && !isNaN(episode) ? episode : null;
+      const history = data.vidsrc_history || [];
+      const now = Date.now();
+      const curSeason = isMovie ? null : (season != null && !isNaN(season) ? season : null);
+      const curEpisode = isMovie ? null : (episode != null && !isNaN(episode) ? episode : null);
 
-    const existingIdx = history.findIndex(e =>
-      e.imdb === lookupBm.imdb &&
-      e.type === lookupBm.type &&
-      e.season === curS &&
-      e.episode === curE &&
-      (Date.now() - e.watchedAt) < 7200000
-    );
+      const existingIdx = history.findIndex(e =>
+        e.imdb === bm.imdb && e.type === bm.type &&
+        e.season === curSeason && e.episode === curEpisode
+      );
 
-    if (existingIdx >= 0) {
-      history[existingIdx].watchedAt = Date.now();
-      history[existingIdx].status = 'watching';
-      const [entry] = history.splice(existingIdx, 1);
-      history.unshift(entry);
-    } else {
-      // Mark previous episodes as watched
-      if (lookupBm.type === 'tv' && curS && curE) {
+      if (existingIdx >= 0) {
+        history[existingIdx].watchedAt = now;
+        history.unshift(history.splice(existingIdx, 1)[0]);
+      } else {
+        history.unshift({
+          historyId: now.toString(36) + Math.random().toString(36).slice(2, 6),
+          imdb: bm.imdb, name: bm.name, type: bm.type,
+          imageUrl: bm.imageUrl || null,
+          season: curSeason, episode: curEpisode,
+          watchedAt: now,
+          status: isMovie ? 'watched' : 'watching',
+        });
+        if (history.length > 200) history.length = 200;
+      }
+
+      // Mark previous TV episodes as watched
+      if (!isMovie && curSeason != null && curEpisode != null) {
+        const curKey = curSeason * 10000 + curEpisode;
         let prevIdx = -1, prevKey = 0;
-        const curKey = curS * 10000 + curE;
         for (let i = 0; i < history.length; i++) {
           const e = history[i];
-          if (e.imdb === lookupBm.imdb && e.type === 'tv' && e.season && e.episode) {
+          if (e.imdb === bm.imdb && e.type === 'tv' && e.season != null && e.episode != null) {
             const key = e.season * 10000 + e.episode;
             if (key < curKey && key > prevKey && e.status === 'watching') {
               prevKey = key; prevIdx = i;
@@ -403,79 +217,208 @@ contextBridge.exposeInMainWorld('chrome', {
         if (prevIdx >= 0) history[prevIdx].status = 'watched';
       }
 
-      history.unshift({
-        historyId: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-        imdb: lookupBm.imdb,
-        name: lookupBm.name,
-        type: lookupBm.type,
-        imageUrl: lookupBm.imageUrl || null,
-        season: curS,
-        episode: curE,
-        watchedAt: Date.now(),
-        status: 'watching',
-      });
+      await S.set({ vidsrc_history: history });
+      historyRecorded = true;
+    } catch (_) {
+      if (historyAttempts > 5) historyRecorded = true;
     }
-
-    if (history.length > 200) history.length = 200;
-    historyRecorded = true;
-
-    // Retry up to 5 times
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        await storageSet({ vidsrc_history: history });
-        return;
-      } catch (_) {
-        await new Promise(r => setTimeout(r, 200));
-      }
-    }
-    historyRecorded = false; // give up — allow retry on next trigger
   }
 
-  /* ── Init ─────────────────────────────────────────────────── */
-  if (!isMovie && trackedBookmark) {
-    buildButtons();
-    updateTracking();
-
-    // MutationObserver — rebuild buttons if DOM is replaced (SPA navigation)
-    const observer = new MutationObserver(() => {
-      if (!document.getElementById('wta-next-ep')) {
-        storageGet({ vidsrc_bookmarks: [] }).then(d => {
-          const fresh = d.vidsrc_bookmarks || [];
-          trackedBookmark = findBookmark(fresh, parsedId);
-          if (trackedBookmark) buildButtons();
-        });
-      }
-      updateButtonVisibility();
-    });
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-  }
-
-  // History recording triggers
-  setTimeout(recordWatchHistory, 15000);
-  let histInterval = setInterval(recordWatchHistory, 10000);
+  setTimeout(() => { if (!historyRecorded) recordWatchHistory(); }, 15000);
+  historyTimer = setInterval(() => {
+    if (!historyRecorded && document.visibilityState === 'visible') recordWatchHistory();
+  }, 10000);
 
   document.addEventListener('visibilitychange', () => {
-    updateButtonVisibility();
     if (document.visibilityState === 'hidden') recordWatchHistory();
   });
-
-  window.addEventListener('pagehide', () => {
-    recordWatchHistory();
-    clearInterval(histInterval);
-  });
-
+  window.addEventListener('pagehide', recordWatchHistory);
   window.addEventListener('beforeunload', () => {
+    if (historyTimer) clearInterval(historyTimer);
     recordWatchHistory();
-    clearInterval(histInterval);
   });
 
-  // Fullscreen listeners
-  document.addEventListener('fullscreenchange', updateButtonVisibility);
-  document.addEventListener('webkitfullscreenchange', updateButtonVisibility);
-  document.addEventListener('mozfullscreenchange', updateButtonVisibility);
+  /* ── Episode data fetch (TVmaze) ──────────────────────────── */
+  const TVMAZE = 'https://api.tvmaze.com';
 
-  // Initial fullscreen check (video players may enter fullscreen after load)
-  setTimeout(updateButtonVisibility, 1000);
-  setTimeout(updateButtonVisibility, 3000);
+  async function fetchEpisodeData(lookupId) {
+    try {
+      let resp = await fetch(`${TVMAZE}/lookup/shows?imdb=${encodeURIComponent(lookupId)}`);
+      let show;
+      if (resp.ok) show = await resp.json();
+      if (!show?.id) {
+        resp = await fetch(`${TVMAZE}/singlesearch/shows?q=${encodeURIComponent(lookupId)}`);
+        if (resp.ok) {
+          show = await resp.json();
+          if (show?.externals?.imdb !== lookupId) show = null;
+        }
+      }
+      if (!show?.id) return null;
+      const epResp = await fetch(`${TVMAZE}/shows/${show.id}/episodes`);
+      if (!epResp.ok) return null;
+      const episodes = await epResp.json();
+      if (!Array.isArray(episodes) || !episodes.length) return null;
+      return episodes;
+    } catch (_) { return null; }
+  }
 
+  function buildEpisodeMap(episodes) {
+    if (!Array.isArray(episodes)) return null;
+    const map = { totalSeasons: 0, maxEpisodes: {} };
+    for (const ep of episodes) {
+      const s = ep.season, e = (ep.number ?? ep.episode);
+      if (!s || e == null) continue;
+      if (s > map.totalSeasons) map.totalSeasons = s;
+      if (!map.maxEpisodes[s] || e > map.maxEpisodes[s]) map.maxEpisodes[s] = e;
+    }
+    return map.totalSeasons > 0 ? map : null;
+  }
+
+  /* ── Navigation (TV only) ─────────────────────────────────── */
+  if (isMovie) return;
+
+  function go(targetSeason, targetEpisode) {
+    if (targetSeason === state.season && targetEpisode === state.episode) return;
+    if (navMode === 'query') {
+      const next = new URL(window.location.href);
+      const sKey = url.searchParams.has('season') ? 'season' : url.searchParams.has('s') ? 's' : 'se';
+      const eKey = url.searchParams.has('episode') ? 'episode' : url.searchParams.has('e') ? 'e' : 'ep';
+      next.searchParams.set(sKey, String(targetSeason));
+      next.searchParams.set(eKey, String(targetEpisode));
+      window.location.assign(next.toString());
+    } else if (navMode === 'hybrid') {
+      const next = new URL(window.location.href);
+      const oldVal = next.searchParams.get(parsed.paramKey) || '';
+      next.searchParams.set(parsed.paramKey, oldVal.replace(/\/\d+\/\d+$/, `/${targetSeason}/${targetEpisode}`));
+      window.location.assign(next.toString());
+    } else if (navMode === 'hyphen') {
+      const parts = [...parsed.parts];
+      parts[parsed.idx] = `${parsed.parsedId}-${targetSeason}-${targetEpisode}`;
+      window.location.assign(url.origin + '/' + parts.join('/') + url.search);
+    } else if (parsed.parts && parsed.idx >= 0 && parsed.idx + 2 < parsed.parts.length) {
+      const p = [...parsed.parts];
+      p[parsed.idx + 1] = String(targetSeason);
+      p[parsed.idx + 2] = String(targetEpisode);
+      window.location.assign(url.origin + '/' + p.join('/') + url.search);
+    }
+  }
+
+  /* ── Button factory ───────────────────────────────────────── */
+  function createButton(id, arrow, label, posStyle, onClick) {
+    if (document.getElementById(id)) return;
+    const btn = document.createElement('div');
+    btn.id = id; btn.className = 'vidsrc-nav-btn';
+    const a = document.createElement('span'); a.className = 'vidsrc-nav-arrow'; a.textContent = arrow;
+    const l = document.createElement('span'); l.className = 'vidsrc-nav-label'; l.textContent = label;
+    btn.appendChild(a); btn.appendChild(l);
+    Object.assign(btn.style, posStyle);
+    btn.addEventListener('click', (e) => { e.stopPropagation(); e.preventDefault(); onClick(); });
+    document.body.appendChild(btn);
+  }
+
+  /* ── Build buttons (episode-data-aware) ───────────────────── */
+  let building = false;
+  async function buildButtonsWithEpisodeData() {
+    if (building) return;
+    building = true;
+
+    let bm = trackedBookmark;
+    if (!bm) {
+      try {
+        const data = await S.get({ vidsrc_bookmarks: [] });
+        bm = findBookmark(data.vidsrc_bookmarks, parsedId);
+      } catch (_) {}
+    }
+    if (!bm || bm.type !== 'tv') { building = false; return; }
+
+    const curS = state.season, curE = state.episode;
+    let maxS = 999, maxEp = 999;
+
+    // Fetch real episode limits (cache-first)
+    try {
+      const availData = await S.get({ vidsrc_availability: {} });
+      const cached = (availData.vidsrc_availability || {})[bm.bookmarkId];
+
+      if (cached?.data?.episodes) {
+        const map = buildEpisodeMap(cached.data.episodes);
+        if (map) { maxS = map.totalSeasons; maxEp = map.maxEpisodes[curS] || 0; }
+      } else {
+        const episodes = await fetchEpisodeData(bm.imdb);
+        if (episodes) {
+          const map = buildEpisodeMap(episodes);
+          if (map) { maxS = map.totalSeasons; maxEp = map.maxEpisodes[curS] || 0; }
+          // Save to cache (non-blocking)
+          S.get({ vidsrc_availability: {} }).then(ad => {
+            const c = ad.vidsrc_availability || {};
+            c[bm.bookmarkId] = { ts: Date.now(), data: { found: true, episodes } };
+            S.set({ vidsrc_availability: c });
+          });
+        }
+      }
+    } catch (_) { /* buttons degrade gracefully */ }
+
+    // Remove existing buttons
+    ['vidsrc-prev-ep','vidsrc-next-ep','vidsrc-prev-season','vidsrc-next-season']
+      .forEach(id => { const el = document.getElementById(id); if (el) el.remove(); });
+
+    // Previous episode
+    if (curE > 1 || curS > 1) {
+      const ps = curE > 1 ? curS : curS - 1;
+      const pe = curE > 1 ? curE - 1 : (maxEp < 999 ? maxEp : 99);
+      createButton('vidsrc-prev-ep', '\u25C0\uFE0E', `Ep ${pe}`,
+        { left: '6px', top: '50%', marginTop: '-17px', zIndex: '2147483647' },
+        () => go(ps, pe));
+    }
+
+    // Next episode
+    const hasNextEp = curE < maxEp;
+    const hasNextSeason = curS < maxS;
+    if (hasNextEp || hasNextSeason) {
+      const ns = hasNextEp ? curS : curS + 1;
+      const ne = hasNextEp ? curE + 1 : 1;
+      createButton('vidsrc-next-ep', '\u25B6\uFE0E', `Ep ${ne}`,
+        { right: '6px', top: '50%', marginTop: '-17px', zIndex: '2147483647' },
+        () => go(ns, ne));
+    }
+
+    // Previous season
+    if (curS > 1) {
+      createButton('vidsrc-prev-season', '\u25B2', `S${curS - 1}`,
+        { left: '50%', top: '4px', marginLeft: '-50px', zIndex: '2147483647' },
+        () => go(curS - 1, 1));
+    }
+
+    // Next season
+    if (hasNextSeason) {
+      createButton('vidsrc-next-season', '\u25BC', `S${curS + 1}`,
+        { left: '50%', bottom: '4px', marginLeft: '-50px', zIndex: '2147483647' },
+        () => go(curS + 1, 1));
+    }
+
+    building = false;
+  }
+
+  buildButtonsWithEpisodeData();
+
+  // Re-inject if SPA replaces DOM (throttled 200ms)
+  let rebuildTimer = null;
+  new MutationObserver(() => {
+    if (!document.getElementById('vidsrc-next-ep') && !document.getElementById('vidsrc-prev-ep')) {
+      clearTimeout(rebuildTimer);
+      rebuildTimer = setTimeout(buildButtonsWithEpisodeData, 200);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
+  /* ── Fullscreen detection ─────────────────────────────────── */
+  function onFullscreenChange() {
+    state.fullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement);
+    ['vidsrc-prev-ep','vidsrc-next-ep','vidsrc-prev-season','vidsrc-next-season'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.classList.toggle('vidsrc-nav-hidden', state.fullscreen);
+    });
+  }
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+  document.addEventListener('mozfullscreenchange', onFullscreenChange);
+  onFullscreenChange();
 })();

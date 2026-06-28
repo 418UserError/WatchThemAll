@@ -32,6 +32,8 @@ class PopupUI {
     this._bindHistoryClear();
     this._bindWatchlist();
     this._bindTabSearches();
+    this._bindDataBar();
+    this._listenForDataImported();
     await this._loadCatalog();
     await this._loadAndRender();
     await this._restoreFormState();
@@ -213,6 +215,21 @@ class PopupUI {
     this.$('#tab-history').classList.toggle('active', tab === 'history');
     this.storage.saveFormState({ _tab: tab });
     this._refresh();
+
+    // Desktop: auto-focus the tab's search field
+    const searchMap = {
+      schemas: '#schema-search',
+      bookmarks: '#bm-filter-search',
+      watchlist: '#wl-filter-search',
+      history: '#hist-search',
+    };
+    const sel = searchMap[tab];
+    if (sel) {
+      setTimeout(() => {
+        const input = document.querySelector(sel);
+        if (input && document.activeElement !== input) input.focus();
+      }, 50);
+    }
   }
 
   _refresh() {
@@ -243,17 +260,19 @@ class PopupUI {
     }
 
     // 3. Merge bundled providers (tested defaults not in GitHub list)
+    // Ensure catalog is always an array before merging
+    if (!this.providerCatalog) this.providerCatalog = [];
     try {
       const bundled = await window.wtAPI.readProvidersJson();
-      const existingIds = new Set((this.providerCatalog || []).map(p => p.id));
+      const existingIds = new Set(this.providerCatalog.map(p => p.id));
       for (const p of bundled) {
         if (!existingIds.has(p.id)) {
-          (this.providerCatalog || []).push(p);
+          this.providerCatalog.push(p);
         }
       }
     } catch (_) { /* no bundled fallback */ }
 
-    if (!this.providerCatalog || !this.providerCatalog.length) {
+    if (!this.providerCatalog.length) {
       this.providerCatalog = [];
     }
 
@@ -1727,6 +1746,50 @@ class PopupUI {
       const updateCount = this.watchlist.filter(w => w.hasUpdate).length;
       wlTabBtn.textContent = updateCount > 0 ? `Watchlist (${updateCount})` : 'Watchlist';
       wlTabBtn.style.color = updateCount > 0 ? 'var(--warning)' : '';
+    }
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     DATA EXPORT / IMPORT
+     ═════════════════════════════════════════════════════════════ */
+  _bindDataBar() {
+    this.$('#export-btn')?.addEventListener('click', () => this._exportData());
+    this.$('#import-btn')?.addEventListener('click', () => this.$('#import-file')?.click());
+    this.$('#import-file')?.addEventListener('change', (e) => this._importData(e));
+  }
+
+  _listenForDataImported() {
+    // Called when File → Import from menu completes
+    if (window.wtAPI) {
+      window.wtAPI.onDataImported?.(async () => {
+        await this._loadAndRender();
+      });
+    }
+  }
+
+  async _exportData() {
+    if (!window.wtAPI) return;
+    const payload = await window.wtAPI.exportData();
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `watchthemall-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async _importData(event) {
+    const file = event.target.files?.[0];
+    if (!file || !window.wtAPI) return;
+    try {
+      const text = await file.text();
+      const payload = JSON.parse(text);
+      await window.wtAPI.importData(payload);
+      event.target.value = '';
+      await this._loadAndRender();
+    } catch (err) {
+      console.error('Import failed:', err);
     }
   }
 }

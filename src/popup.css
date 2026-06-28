@@ -104,7 +104,7 @@ html {
 body {
   width: 100%;
   max-width: 100%;
-  min-width: 400px;
+  min-width: 600px;
   min-height: 500px;
   font-family: var(--font-sans);
   font-size: var(--fs-base);
@@ -130,75 +130,74 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   APP SHELL
+   APP SHELL (sidebar + content)
    ═══════════════════════════════════════════════════════════════════ */
 .app {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   min-height: 100vh;
-  padding: 0 2px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   HEADER
+   SIDEBAR
    ═══════════════════════════════════════════════════════════════════ */
-header {
-  padding: var(--sp-5) var(--sp-5) 0;
-  margin-bottom: var(--sp-4);
+.sidebar {
+  width: 172px;
+  min-width: 172px;
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
+  flex-direction: column;
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.header-brand {
+.sidebar-brand {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: 10px;
+  padding: 16px 14px 12px;
 }
 
-.header-icon {
-  width: 30px;
-  height: 30px;
+.brand-icon {
+  width: 28px;
+  height: 28px;
   background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  border-radius: var(--radius-sm);
+  border-radius: 7px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 15px;
+  font-size: 14px;
   color: #fff;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.25);
 }
 
-header h1 {
-  font-size: var(--fs-lg);
+.brand-text {
+  font-size: var(--fs-md);
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.3px;
-  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.subtitle {
-  display: none; /* minimal mode — no subtitle */
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   TAB BAR
-   ═══════════════════════════════════════════════════════════════════ */
-.tab-bar {
+/* ── Sidebar navigation items ──────────────────────────────── */
+.sidebar-nav {
+  flex: 1;
   display: flex;
-  padding: 0 var(--sp-4);
-  gap: 2px;
-  margin-bottom: var(--sp-3);
-  background: var(--bg-surface);
-  border-radius: var(--radius-md);
-  margin: 0 var(--sp-4) var(--sp-4);
-  padding: 3px;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 8px;
 }
 
 .tab-btn {
-  flex: 1;
-  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
   font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--text-secondary);
@@ -208,19 +207,90 @@ header h1 {
   cursor: pointer;
   transition: all var(--dur-fast) var(--ease-out);
   font-family: inherit;
-  text-align: center;
+  text-align: left;
   position: relative;
 }
 
 .tab-btn:hover {
   color: var(--text-primary);
+  background: var(--bg-hover);
 }
 
 .tab-btn.active {
   color: var(--text-primary);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-xs);
+  background: var(--accent-subtle);
   font-weight: 600;
+}
+
+.tab-btn.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  background: var(--accent);
+  border-radius: 0 3px 3px 0;
+}
+
+.tab-icon {
+  font-size: 14px;
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+.tab-btn.active .tab-icon {
+  opacity: 1;
+}
+
+.tab-label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Shortcut badge in sidebar */
+.tab-btn kbd {
+  font-size: 9px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  background: var(--bg-active);
+  border-radius: 3px;
+  padding: 1px 4px;
+  line-height: 1.3;
+  flex-shrink: 0;
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.tab-btn.active kbd {
+  color: var(--accent);
+  background: rgba(99, 102, 241, 0.12);
+}
+.tab-btn:hover kbd {
+  color: var(--text-secondary);
+}
+
+/* ── Sidebar footer ────────────────────────────────────────── */
+.sidebar-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.sidebar-version {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CONTENT AREA
+   ═══════════════════════════════════════════════════════════════════ */
+.content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -228,7 +298,7 @@ header h1 {
    ═══════════════════════════════════════════════════════════════════ */
 .tab-panel {
   display: none;
-  padding: 0 var(--sp-4) var(--sp-5);
+  padding: var(--sp-4);
   animation: panelIn var(--dur-normal) var(--ease-out);
 }
 
@@ -1553,4 +1623,62 @@ select:focus {
   border: 1px solid var(--border-subtle);
   cursor: default;
   opacity: 0.45;
+}
+
+/* ── App Footer (desktop only) ──────────────────────────────── */
+.app-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  margin-top: auto;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--border-subtle);
+  opacity: 0.6;
+  flex-shrink: 0;
+  user-select: none;
+}
+.app-footer .footer-sep {
+  opacity: 0;
+}
+.app-footer .footer-right {
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+/* ── Data bar (export / import) ─────────────────────────────── */
+.data-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px var(--sp-4);
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+.data-bar-btn {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
+}
+.data-bar-btn:hover {
+  color: var(--accent);
+  background: var(--accent-subtle);
+}
+.data-bar-sep {
+  color: var(--text-tertiary);
+  opacity: 0.3;
+  font-size: 10px;
 }

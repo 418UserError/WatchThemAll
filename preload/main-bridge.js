@@ -73,12 +73,37 @@ contextBridge.exposeInMainWorld('wtAPI', {
   // Returns the parsed providers.json object (already cached at preload init)
   async readProvidersJson() {
     if (_providersJsonReady) return _providersJson;
-    // If not cached yet, fetch directly
     return ipcRenderer.invoke('read-providers-json');
   },
 
   // Opens an embed URL in a dedicated player window
   openEmbed(url) {
     return ipcRenderer.invoke('open-embed', url);
+  },
+
+  // Export all data as JSON
+  exportData() {
+    return ipcRenderer.invoke('export-data');
+  },
+
+  // Import data from JSON payload
+  importData(payload) {
+    return ipcRenderer.invoke('import-data', payload);
+  },
+
+  // Get data directory path
+  getDataDir() {
+    return ipcRenderer.invoke('get-data-dir');
+  },
+
+  // Listen for menu/navigation events from main process
+  onMenuAction(callback) {
+    ipcRenderer.on('menu-action', (_event, action) => callback(action));
+  },
+  onNavigateTab(callback) {
+    ipcRenderer.on('navigate-tab', (_event, tab) => callback(tab));
+  },
+  onDataImported(callback) {
+    ipcRenderer.on('data-imported', () => callback());
   },
 });
