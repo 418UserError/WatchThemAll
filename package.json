@@ -5,11 +5,11 @@
   "main": "main.js",
   "scripts": {
     "start": "npx electron .",
-    "build": "python3 scripts/build.py all",
+    "build:linux": "npx electron-builder --linux",
+    "build:win": "npx electron-builder --win",
+    "build:mac": "npx electron-builder --mac",
     "dist": "npx electron-builder",
-    "dist:linux": "npx electron-builder --linux",
-    "dist:win": "npx electron-builder --win",
-    "dist:mac": "npx electron-builder --mac"
+    "test": "node --test test/"
   },
   "build": {
     "appId": "dev.predixcode.watchthemall",

@@ -315,6 +315,7 @@ ipcMain.handle('storage:get', (_event, defaults) => {
   for (const [key, defaultVal] of Object.entries(defaults)) {
     result[key] = (key in store) ? store[key] : defaultVal;
   }
+  console.log('[WTA main] storage:get keys:', Object.keys(defaults), '→ returning', Object.keys(result).length, 'keys');
   return result;
 });
 
@@ -322,6 +323,7 @@ ipcMain.handle('storage:set', (_event, obj) => {
   const store = loadStore();
   Object.assign(store, obj);
   flushStore();
+  console.log('[WTA main] storage:set keys:', Object.keys(obj));
   return true;
 });
 
@@ -341,6 +343,8 @@ ipcMain.handle('open-embed', (_event, url) => {
       preload: path.join(__dirname, 'preload', 'embed-bridge.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
+      webSecurity: false,
     },
   });
 
@@ -461,6 +465,8 @@ function createMainWindow() {
       preload: path.join(__dirname, 'preload', 'main-bridge.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
+      webSecurity: false,
     },
   });
 

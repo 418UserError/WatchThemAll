@@ -25,6 +25,7 @@ class PopupUI {
 
   /* ── Init ──────────────────────────────────────────────────── */
   async init() {
+    window.__diag?.('PopupUI.init() starting');
     this._bindTabs();
     this._bindBookmarkForm();
     this._bindFilterBar();
@@ -34,9 +35,35 @@ class PopupUI {
     this._bindTabSearches();
     this._bindDataBar();
     this._listenForDataImported();
-    await this._loadCatalog();
-    await this._loadAndRender();
+
+    // Load catalog (best-effort — failure must not block the rest)
+    window.__diag?.('_loadCatalog starting...');
+    try { await this._loadCatalog(); } catch (e) {
+      window.__diag_err?.('_loadCatalog', e);
+      console.error('[WTA] _loadCatalog failed:', e);
+      this.providerCatalog = [];
+    }
+    window.__diag?.('_loadCatalog done. providerCatalog.length=' + (this.providerCatalog?.length || 0));
+
+    // Load data and render (MUST run regardless of catalog state)
+    window.__diag?.('_loadAndRender starting...');
+    try { await this._loadAndRender(); } catch (e) {
+      window.__diag_err?.('_loadAndRender', e);
+      console.error('[WTA] _loadAndRender failed:', e);
+    }
+    window.__diag?.('_loadAndRender done. schemas=' + (this.schemas?.length||0) + ' bookmarks=' + (this.bookmarks?.length||0) + ' watchlist=' + (this.watchlist?.length||0));
+
+    // Show data file location for debugging
+    if (window.wtAPI) {
+      try {
+        const dir = await window.wtAPI.getDataDir();
+        window.__diag?.('Data dir: ' + dir);
+      } catch(_) {}
+    }
+
+    window.__diag?.('_restoreFormState starting...');
     await this._restoreFormState();
+    window.__diag?.('init() complete');
   }
 
   /* ═════════════════════════════════════════════════════════════

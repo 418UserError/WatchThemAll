@@ -8,6 +8,54 @@
 </head>
 <body>
 
+<!-- ═══════════ DIAGNOSTIC PANEL (Ctrl+Shift+D to toggle) ══════ -->
+<div id="wta-diag" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,0.92);color:#0f0;font:11px monospace;padding:20px;overflow-y:auto;white-space:pre-wrap"></div>
+<script>
+// Inline diagnostic — runs before any other script
+window.__diag = function(msg) {
+  var el = document.getElementById('wta-diag');
+  if (el) el.textContent += msg + '\n';
+  console.log('[WTA]', msg);
+};
+window.__diag_err = function(msg, e) {
+  var el = document.getElementById('wta-diag');
+  if (el) el.textContent += 'ERROR: ' + msg + ' — ' + (e&&e.message||e) + '\n';
+  console.error('[WTA]', msg, e);
+};
+// Check if preload bridge is alive
+document.addEventListener('DOMContentLoaded', function() {
+  __diag('DOM ready');
+  __diag('__wtaChrome exists: ' + (typeof window.__wtaChrome !== 'undefined'));
+  __diag('__wtaAPI exists: ' + (typeof window.__wtaAPI !== 'undefined'));
+  __diag('window.chrome exists: ' + (typeof window.chrome !== 'undefined'));
+  __diag('window.chrome?.storage?.local?.get: ' + (typeof window.chrome?.storage?.local?.get));
+  __diag('window.wtAPI exists: ' + (typeof window.wtAPI !== 'undefined'));
+  __diag('window.wtAPI?.readProvidersJson: ' + (typeof window.wtAPI?.readProvidersJson));
+  __diag('window.wtAPI?.openEmbed: ' + (typeof window.wtAPI?.openEmbed));
+});
+// Toggle diagnostic panel with Ctrl+Shift+D
+document.addEventListener('keydown', function(e) {
+  if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+    var el = document.getElementById('wta-diag');
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+    e.preventDefault();
+  }
+});
+</script>
+
+<!-- ═══════════ BRIDGE ALIAS (preload → window.chrome/wtAPI) ═══ -->
+<script>
+// window.chrome is pre-existing in Chromium and contextBridge cannot
+// overwrite it. The preload exposes APIs under __wtaChrome / __wtaAPI.
+// We copy them to the expected names here.
+if (window.__wtaChrome) {
+  window.chrome = window.__wtaChrome;
+}
+if (window.__wtaAPI) {
+  window.wtAPI = window.__wtaAPI;
+}
+</script>
+
 <div class="app">
   <!-- ═══════════ SIDEBAR ════════════════════════════════════ -->
   <nav class="sidebar">
