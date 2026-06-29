@@ -378,22 +378,16 @@ ipcMain.handle('open-embed', (_event, url) => {
     height: 800,
     title: 'WatchThemAll — Player',
     webPreferences: {
+      preload: path.join(__dirname, 'preload', 'embed-bridge.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
     },
   });
 
   embedWin.loadURL(url);
   embedWin.show();
   embedWin.focus();
-
-  // Inject navigation buttons — runs on every navigation
-  var buttonScript = fs.readFileSync(path.join(__dirname, 'preload', 'embed-bridge.js'), 'utf-8');
-  function injectButtons() {
-    embedWin.webContents.executeJavaScript(buttonScript).catch(function() {});
-  }
-  embedWin.webContents.on('did-finish-load', injectButtons);
-  embedWin.webContents.on('did-navigate-in-page', injectButtons);
 
   // Block ALL popups from player windows — no ads, no popups.
   embedWin.webContents.setWindowOpenHandler(() => {
