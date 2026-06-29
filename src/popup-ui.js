@@ -75,7 +75,7 @@ class PopupUI {
     // Build schemas from active provider IDs + catalog
     let activeIds = await this.storage.loadActiveProviderIds();
     if (!activeIds || !activeIds.length) {
-      activeIds = ['vidcore', 'cinemaos', 'screenscape', 'vidsrc-me'];
+      activeIds = ['cinemaos', 'screenscape', 'vidsrc-me', 'vidsrc-to'];
       await this.storage.saveActiveProviderIds(activeIds);
     }
 

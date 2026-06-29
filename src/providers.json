@@ -12,7 +12,6 @@
   {"id":"vidflix","name":"VidFlix","rootUrl":"https://vidflix.club/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
   {"id":"vidrock","name":"VidRock","rootUrl":"https://vidrock.ru/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
   {"id":"vidlux","name":"VidLux","rootUrl":"https://vidlux.xyz/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
-  {"id":"vidcore","name":"VidCore","rootUrl":"https://www.vidcore.net/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
   {"id":"multiembed","name":"SuperEmbed","rootUrl":"https://multiembed.mov/","tv":{"urlTemplate":"{rootUrl}?video_id={imdb}&s={season}&e={episode}"},"movie":{"urlTemplate":"{rootUrl}?video_id={imdb}"},"tier":"extras"},
   {"id":"nontongo","name":"Nontongo","rootUrl":"https://www.nontongo.win/embed/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},
   {"id":"moviesapi","name":"MoviesAPI","rootUrl":"https://moviesapi.to/","tv":{"urlTemplate":"{rootUrl}tv/{imdb}/{season}/{episode}"},"movie":{"urlTemplate":"{rootUrl}movie/{imdb}"},"tier":"extras"},

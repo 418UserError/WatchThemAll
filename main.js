@@ -15,12 +15,50 @@
  *   - JSON file storage (zero external dependencies)
  */
 
-const { app, BrowserWindow, ipcMain, Menu, Tray, Notification, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, Tray, Notification, dialog, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const APP_NAME = 'WatchThemAll';
 const APP_VERSION = app.getVersion();
+
+// ── Browser Identity Spoofing ─────────────────────────────────
+// Providers block requests with "Electron" in the User-Agent.
+// We spoof a standard Chrome UA so all API calls (health probes,
+// IMDB searches, TVmaze, TMDB, GitHub) look like regular Chrome.
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+
+function setupBrowserIdentity() {
+  const ses = session.defaultSession;
+
+  // Override User-Agent at the session level
+  ses.setUserAgent(CHROME_UA);
+
+  // Strip Electron-revealing headers from every HTTP request
+  ses.webRequest.onBeforeSendHeaders(
+    { urls: ['http://*/*', 'https://*/*'] },
+    (details, callback) => {
+      delete details.requestHeaders['Sec-CH-UA'];
+      delete details.requestHeaders['Sec-CH-UA-Arch'];
+      delete details.requestHeaders['Sec-CH-UA-Bitness'];
+      delete details.requestHeaders['Sec-CH-UA-Full-Version'];
+      delete details.requestHeaders['Sec-CH-UA-Full-Version-List'];
+      delete details.requestHeaders['Sec-CH-UA-Mobile'];
+      delete details.requestHeaders['Sec-CH-UA-Model'];
+      delete details.requestHeaders['Sec-CH-UA-Platform'];
+      delete details.requestHeaders['Sec-CH-UA-Platform-Version'];
+      callback({ requestHeaders: details.requestHeaders });
+    }
+  );
+}
+
+// Call after app is ready — session API requires it
+let _identitySetup = false;
+function ensureBrowserIdentity() {
+  if (_identitySetup) return;
+  _identitySetup = true;
+  setupBrowserIdentity();
+}
 
 // ── JSON File Store ───────────────────────────────────────────
 const DATA_DIR = path.join(app.getPath('userData'), 'data');
@@ -340,15 +378,22 @@ ipcMain.handle('open-embed', (_event, url) => {
     height: 800,
     title: 'WatchThemAll — Player',
     webPreferences: {
-      preload: path.join(__dirname, 'preload', 'embed-bridge.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
-      webSecurity: false,
     },
   });
 
   embedWin.loadURL(url);
+  embedWin.show();
+  embedWin.focus();
+
+  // Inject navigation buttons — runs on every navigation
+  var buttonScript = fs.readFileSync(path.join(__dirname, 'preload', 'embed-bridge.js'), 'utf-8');
+  function injectButtons() {
+    embedWin.webContents.executeJavaScript(buttonScript).catch(function() {});
+  }
+  embedWin.webContents.on('did-finish-load', injectButtons);
+  embedWin.webContents.on('did-navigate-in-page', injectButtons);
 
   // Block ALL popups from player windows — no ads, no popups.
   embedWin.webContents.setWindowOpenHandler(() => {
@@ -490,6 +535,7 @@ function createMainWindow() {
 
 // ── App Lifecycle ─────────────────────────────────────────────
 app.whenReady().then(() => {
+  ensureBrowserIdentity();
   loadStore();
   buildMenu();
   createMainWindow();
@@ -499,8 +545,9 @@ app.whenReady().then(() => {
   // Only the main window and embed windows (opened via open-embed IPC)
   // are allowed to exist. Ads sometimes find ways to spawn windows
   // that bypass per-webContents handlers.
+  // DISABLED for debugging player click issues
+  /*
   app.on('browser-window-created', (_event, win) => {
-    // Give the window a moment to be registered by open-embed
     setImmediate(() => {
       if (win === mainWindow) return;
       let found = false;
@@ -512,6 +559,7 @@ app.whenReady().then(() => {
       }
     });
   });
+  */
 
   // System tray (optional — can be disabled from settings)
   try {

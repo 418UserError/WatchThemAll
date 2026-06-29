@@ -258,8 +258,6 @@ class WatchlistItem {
 
 /* ── Default providers (hard fallback) ────────────────────────── */
 const DEFAULT_SCHEMAS = [
-  new Schema({ schemaId:'default_vidcore',   name:'VidCore',     rootUrl:'https://www.vidcore.net/',
-    tv:{urlTemplate:'{rootUrl}tv/{imdb}/{season}/{episode}'},    movie:{urlTemplate:'{rootUrl}movie/{imdb}'} }),
   new Schema({ schemaId:'default_cinemaos',  name:'CinemaOS',    rootUrl:'https://cinemaos.tech/player',
     tv:{urlTemplate:'{rootUrl}{tmdb}/{season}/{episode}'},       movie:{urlTemplate:'{rootUrl}{imdb}'} }),
   new Schema({ schemaId:'default_screenscape',name:'ScreenScape',rootUrl:'https://screenscape.me/embed',
