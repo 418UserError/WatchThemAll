@@ -39,36 +39,29 @@ class AppUI {
      INIT
      ═════════════════════════════════════════════════════════════ */
   async init() {
-    window.__diag?.('AppUI.init() starting');
-
     this._bindHeader();
-    this._bindFilters();
+    this._bindSidebarCollapse();
+    this._bindCommandPalette();
+    this._bindTabs();
     this._bindSidebarAdd();
     this._bindProviders();
     this._bindGlobalSearch();
     this._bindModal();
     this._bindEditModal();
     this._bindKeyboard();
+    this._bindEmptySpaceClicks();
 
     // Load data
-    try { await this._loadCatalog(); } catch (e) { window.__diag_err?.('_loadCatalog', e); }
-    window.__diag?.('catalog loaded: ' + (this.providerCatalog?.length || 0));
+    try { await this._loadCatalog(); } catch (e) { /* continue */ }
+    try { await this._loadAndRender(); } catch (e) { /* continue */ }
 
-    try { await this._loadAndRender(); } catch (e) { window.__diag_err?.('_loadAndRender', e); }
-    window.__diag?.('_loadAndRender done');
+    // Restore persisted UI state
+    const restored = await this._restoreUIState();
+    if (!restored && this.activeFilter === 'bookmarks') this._setFilter('all');
 
     this._setupIPCListeners();
 
     // Set data dir in status bar
-    if (window.wtAPI) {
-      try {
-        const dir = await window.wtAPI.getDataDir();
-        const el = this.$('#status-left');
-        if (el) { el.textContent = dir; el.title = dir; }
-      } catch (_) { /* non-critical */ }
-    }
-
-    window.__diag?.('init() complete');
   }
 
   /* ═════════════════════════════════════════════════════════════
@@ -279,7 +272,6 @@ class AppUI {
      HEADER BINDINGS
      ═════════════════════════════════════════════════════════════ */
   _bindHeader() {
-    this.$('#hdr-add')?.addEventListener('click', () => this._openAddModal());
     this.$('#hdr-check-all')?.addEventListener('click', () => this._wlCheckAll());
     this.$('#hdr-export')?.addEventListener('click', () => this._exportData());
     this.$('#hdr-import')?.addEventListener('click', () => this.$('#import-file')?.click());
@@ -287,29 +279,219 @@ class AppUI {
   }
 
   /* ═════════════════════════════════════════════════════════════
-     FILTERS
+     TABS + FILTERS
      ═════════════════════════════════════════════════════════════ */
-  _bindFilters() {
+  _bindTabs() {
+    // Tab buttons
+    this.$$('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._setTab(btn.dataset.tab));
+    });
+    // Filter buttons
     this.$$('.filter-btn').forEach(btn => {
       btn.addEventListener('click', () => this._setFilter(btn.dataset.filter));
     });
   }
 
-  _setFilter(filter) {
-    this.activeFilter = filter;
+  _setTab(tab) {
+    this._activeTab = tab;
+    this.activeFilter = 'all'; // reset filter on tab switch
     this.selectedItem = null;
     this.selectedBookmark = null;
     this.selectedWatchlistItem = null;
 
-    this.$$('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
+    this.$$('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+    this.$$('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === 'all'));
     this.$$('.sb-item').forEach(b => b.classList.remove('selected'));
+
+    // Show/hide filters based on tab
+    const filterBar = this.$('#sidebar-filters');
+    if (filterBar) filterBar.style.display = (tab === 'bookmarks') ? '' : 'none';
+
+    // Update add button label based on tab
+    const addBtn = this.$('#sidebar-add-btn');
+    if (addBtn) {
+      addBtn.textContent = tab === 'tracked' ? '+ Add' : (tab === 'history' ? '' : '+ Add');
+      addBtn.style.display = tab === 'history' ? 'none' : '';
+    }
 
     this._renderItemList();
     this._renderMainPanel();
 
-    if (filter === 'tracked') this._syncWatchlist();
+    if (tab === 'tracked') this._syncWatchlist();
 
-    this.storage.saveFormState({ _filter: filter });
+    this._saveUIState();
+  }
+
+  _setFilter(filter) {
+    this.activeFilter = filter;
+
+    this.$$('.filter-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
+
+    this._renderItemList();
+    this._saveUIState();
+  }
+
+  _bindSidebarCollapse() {
+    this.$('#sidebar-collapse')?.addEventListener('click', () => {
+      const sidebar = this.$('#sidebar');
+      sidebar.classList.toggle('collapsed');
+      this._saveUIState();
+    });
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     COMMAND PALETTE (⌘K)
+     ═════════════════════════════════════════════════════════════ */
+  _bindCommandPalette() {
+    this._cmdIndex = -1;
+    this._cmdItems = [];
+
+    const input = this.$('#cmd-input');
+    const overlay = this.$('#cmd-overlay');
+
+    // Close on overlay click
+    overlay?.addEventListener('click', (e) => {
+      if (e.target === overlay) this._closeCommandPalette();
+    });
+
+    // Search as you type
+    input?.addEventListener('input', () => this._cmdFilter());
+
+    // Keyboard nav inside palette
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); this._cmdMove(1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); this._cmdMove(-1); }
+      else if (e.key === 'Enter') { e.preventDefault(); this._cmdExecute(); }
+      else if (e.key === 'Escape') { e.preventDefault(); this._closeCommandPalette(); }
+    });
+  }
+
+  _openCommandPalette() {
+    const overlay = this.$('#cmd-overlay');
+    const input = this.$('#cmd-input');
+    overlay.style.display = '';
+    this._cmdIndex = -1;
+    this._cmdItems = [];
+    if (input) { input.value = ''; setTimeout(() => input.focus(), 50); }
+    this._cmdFilter();
+  }
+
+  _closeCommandPalette() {
+    this.$('#cmd-overlay').style.display = 'none';
+    this._cmdIndex = -1;
+    this._cmdItems = [];
+  }
+
+  _cmdFilter() {
+    const q = (this.$('#cmd-input')?.value || '').trim().toLowerCase();
+    const results = this.$('#cmd-results');
+    this._cmdIndex = -1;
+    this._cmdItems = [];
+
+    let html = '';
+
+    // Commands (always shown, filtered by query)
+    const commands = [
+      { icon: '＋', label: 'Add to Library', sub: 'Search IMDB for a series or movie', action: 'add', shortcut: '⌘N' },
+      { icon: '◎', label: 'Track a Series', sub: 'Search TVmaze for a TV series', action: 'track', shortcut: '' },
+      { icon: '↻', label: 'Check All for Updates', sub: 'Force-check all tracked series now', action: 'check', shortcut: '' },
+      { icon: '⤓', label: 'Export Data', sub: 'Save your library as JSON', action: 'export', shortcut: '⌘⇧E' },
+      { icon: '⤒', label: 'Import Data', sub: 'Load a previously exported JSON file', action: 'import', shortcut: '⌘⇧I' },
+    ];
+
+    const matchingCommands = q ? commands.filter(c => c.label.toLowerCase().includes(q) || c.sub.toLowerCase().includes(q)) : commands;
+
+    if (matchingCommands.length) {
+      html += '<div class="cmd-section-label">Commands</div>';
+      matchingCommands.forEach((cmd, i) => {
+        this._cmdItems.push({ type: 'command', action: cmd.action, data: cmd });
+        html += `<div class="cmd-item" data-cmd-idx="${this._cmdItems.length - 1}">
+          <div class="cmd-item-icon">${cmd.icon}</div>
+          <div class="cmd-item-info">
+            <div class="cmd-item-name">${esc(cmd.label)}</div>
+            <div class="cmd-item-sub">${esc(cmd.sub)}</div>
+          </div>
+          ${cmd.shortcut ? `<span class="cmd-item-shortcut">${cmd.shortcut}</span>` : ''}
+        </div>`;
+      });
+    }
+
+    // Library items
+    const allBookmarks = this.bookmarks || [];
+    const matchingBookmarks = q
+      ? allBookmarks.filter(b => b.name.toLowerCase().includes(q) || b.imdb.toLowerCase().includes(q))
+      : allBookmarks.slice(0, 8); // top 8 when no query
+
+    if (matchingBookmarks.length) {
+      html += '<div class="cmd-section-label">Library</div>';
+      matchingBookmarks.forEach(bm => {
+        this._cmdItems.push({ type: 'bookmark', data: bm });
+        html += `<div class="cmd-item" data-cmd-idx="${this._cmdItems.length - 1}">
+          ${bm.imageUrl ? `<img src="${esc(bm.imageUrl)}" class="cmd-item-thumb" onerror="this.style.display='none'">` : '<div class="cmd-item-thumb" style="display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--text-tertiary)">?</div>'}
+          <div class="cmd-item-info">
+            <div class="cmd-item-name">${esc(bm.name)}</div>
+            <div class="cmd-item-sub">${bm.type === 'tv' ? '📺' : '🎬'} ${bm.positionLabel || ''} · ${esc(bm.category||'')}</div>
+          </div>
+        </div>`;
+      });
+    }
+
+    if (!this._cmdItems.length) {
+      html = '<div class="cmd-empty">No matches found</div>';
+    }
+
+    results.innerHTML = html;
+
+    // Click handlers
+    results.querySelectorAll('.cmd-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const idx = parseInt(item.dataset.cmdIdx);
+        this._cmdIndex = idx;
+        this._cmdExecute();
+      });
+    });
+
+    // Select first item by default
+    if (this._cmdItems.length) {
+      this._cmdIndex = 0;
+      this._cmdHighlight();
+    }
+  }
+
+  _cmdMove(dir) {
+    if (!this._cmdItems.length) return;
+    this._cmdIndex = (this._cmdIndex + dir + this._cmdItems.length) % this._cmdItems.length;
+    this._cmdHighlight();
+  }
+
+  _cmdHighlight() {
+    this.$('#cmd-results')?.querySelectorAll('.cmd-item').forEach((el, i) => {
+      el.classList.toggle('active', i === this._cmdIndex);
+    });
+    // Scroll into view
+    const active = document.querySelector('.cmd-item.active');
+    active?.scrollIntoView({ block: 'nearest' });
+  }
+
+  _cmdExecute() {
+    if (this._cmdIndex < 0 || this._cmdIndex >= this._cmdItems.length) return;
+    const item = this._cmdItems[this._cmdIndex];
+    this._closeCommandPalette();
+
+    if (item.type === 'bookmark') {
+      this._selectBookmark(item.data.bookmarkId);
+      this._setTab('bookmarks');
+    } else if (item.type === 'command') {
+      switch (item.action) {
+        case 'add': this._openAddModal('bookmark'); break;
+        case 'track': this._openAddModal('track');
+          this.$$('.modal-tab').forEach(t => t.classList.toggle('active', t.dataset.addMode === 'track'));
+          break;
+        case 'check': this._wlCheckAll(); break;
+        case 'export': this._exportData(); break;
+        case 'import': this.$('#import-file')?.click(); break;
+      }
+    }
   }
 
   _bindSidebarAdd() {
@@ -317,42 +499,57 @@ class AppUI {
   }
 
   /* ═════════════════════════════════════════════════════════════
-     PROVIDERS (collapsible sidebar section)
+     PROVIDERS (sidebar footer toggle)
      ═════════════════════════════════════════════════════════════ */
   _bindProviders() {
     this.$('#providers-toggle')?.addEventListener('click', () => {
-      const list = this.$('#providers-list');
+      const dropdown = this.$('#providers-dropdown');
       const btn = this.$('#providers-toggle');
-      const show = list.style.display === 'none';
-      list.style.display = show ? '' : 'none';
+      const show = dropdown.style.display === 'none';
+      dropdown.style.display = show ? '' : 'none';
       btn.classList.toggle('open', show);
-      if (show) this._renderProviders();
+      if (show) this._renderProvidersDropdown();
     });
   }
 
-  _renderProviders() {
-    const list = this.$('#providers-list');
-    if (!list || !this.providerCatalog.length) return;
+  _renderProvidersDropdown() {
+    const dropdown = this.$('#providers-dropdown');
+    if (!dropdown || !this.providerCatalog.length) {
+      if (dropdown) dropdown.innerHTML = '<div class="empty-hint" style="padding:8px">No providers</div>';
+      return;
+    }
 
     const activeIds = new Set(this.schemas.map(s => s.schemaId));
     const sorted = [...this.providerCatalog].sort((a, b) => a.name.localeCompare(b.name));
 
-    list.innerHTML = sorted.map(p => {
+    dropdown.innerHTML = sorted.map(p => {
       const isActive = activeIds.has(p.id);
       const isLast = activeIds.size <= 1 && isActive;
       const healthClass = p._alive === true ? 'alive' : (p._alive === false ? 'dead' : 'unknown');
-      return `<div class="provider-item">
-        <span class="provider-item-health ${healthClass}"></span>
-        <span class="provider-item-name">${esc(p.name)}</span>
+      return `<div class="provider-item" data-pid="${esc(p.id)}" style="cursor:pointer" title="Click to toggle">
+        <span class="provider-item-name">
+          <span class="provider-item-health ${healthClass}"></span>
+          ${esc(p.name)}
+        </span>
         <button class="provider-item-toggle${isActive ? '' : ' off'}" data-pid="${esc(p.id)}"${isLast ? ' disabled' : ''}>${isActive ? 'On' : 'Off'}</button>
       </div>`;
     }).join('');
 
-    list.querySelectorAll('.provider-item-toggle').forEach(btn => {
+    // Click entire row to toggle
+    dropdown.querySelectorAll('.provider-item').forEach(row => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('.provider-item-toggle')) return;
+        this._toggleProvider(row.dataset.pid);
+      });
+    });
+
+    dropdown.querySelectorAll('.provider-item-toggle').forEach(btn => {
       btn.addEventListener('click', () => this._toggleProvider(btn.dataset.pid));
     });
 
-    this.$('#providers-count').textContent = `${activeIds.size} active`;
+    const count = activeIds.size;
+    const countEl = this.$('#providers-count');
+    if (countEl) countEl.textContent = `${count} active`;
   }
 
   async _toggleProvider(providerId) {
@@ -376,7 +573,7 @@ class AppUI {
     }
     await this.storage.saveAll(this.schemas, this.bookmarks);
 
-    this._renderProviders();
+    this._renderProvidersDropdown();
     this._renderStatusBar();
     this._renderItemList();
     if (this.selectedBookmark) this._renderBookmarkDetail(this.selectedBookmark);
@@ -411,9 +608,9 @@ class AppUI {
     health[provider.id] = { ts: Date.now(), alive: provider._alive };
     await chrome.storage.local.set({ vidsrc_provider_health: health });
 
-    // Refresh provider display if list is open
-    if (this.$('#providers-list')?.style.display !== 'none') {
-      this._renderProviders();
+    // Refresh dropdown if open
+    if (this.$('#providers-dropdown')?.style.display !== 'none') {
+      this._renderProvidersDropdown();
     }
   }
 
@@ -422,14 +619,25 @@ class AppUI {
      ═════════════════════════════════════════════════════════════ */
   _bindGlobalSearch() {
     const input = this.$('#global-search');
+    const clearBtn = this.$('#search-clear');
     if (!input) return;
     let timer = null;
     input.addEventListener('input', () => {
       clearTimeout(timer);
+      const val = input.value.trim();
+      if (clearBtn) clearBtn.style.display = val ? '' : 'none';
       timer = setTimeout(() => {
-        this._renderItemList(input.value.trim().toLowerCase());
+        this._renderItemList(val.toLowerCase());
       }, 200);
     });
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        input.value = '';
+        clearBtn.style.display = 'none';
+        this._renderItemList('');
+        input.focus();
+      });
+    }
   }
 
   /* ═════════════════════════════════════════════════════════════
@@ -437,16 +645,16 @@ class AppUI {
      ═════════════════════════════════════════════════════════════ */
   _getFilteredItems(searchQuery) {
     const q = searchQuery || (this.$('#global-search')?.value || '').trim().toLowerCase();
+    const tab = this._activeTab || 'bookmarks';
 
-    if (this.activeFilter === 'history') {
+    if (tab === 'history') {
       let items = this.history;
       if (q) items = items.filter(h => h.name.toLowerCase().includes(q));
       return { type: 'history', items };
     }
 
-    if (this.activeFilter === 'tracked') {
+    if (tab === 'tracked') {
       let items = [...this.watchlist];
-      // Sort: updates first, then by name
       items.sort((a, b) => {
         if (a.hasUpdate && !b.hasUpdate) return -1;
         if (!a.hasUpdate && b.hasUpdate) return 1;
@@ -456,22 +664,12 @@ class AppUI {
       return { type: 'watchlist', items };
     }
 
-    // Bookmarks filtered by type
+    // Bookmarks tab — filter by type
     let items = [...this.bookmarks];
     if (this.activeFilter === 'tv') items = items.filter(b => b.type === 'tv');
     else if (this.activeFilter === 'movie') items = items.filter(b => b.type === 'movie');
 
     if (q) items = items.filter(b => b.name.toLowerCase().includes(q) || b.imdb.toLowerCase().includes(q));
-
-    // For 'all' filter: also include watchlist-only items (not linked to bookmarks)
-    if (this.activeFilter === 'all' && !q) {
-      const bmImdbs = new Set(this.bookmarks.map(b => b.imdb));
-      const bmBmIds = new Set(this.bookmarks.map(b => b.bookmarkId));
-      const extraWl = this.watchlist.filter(w =>
-        !bmImdbs.has(w.imdb) && !bmBmIds.has(w.bookmarkId)
-      );
-      return { type: 'bookmarks', items, extraWatchlist: extraWl };
-    }
 
     return { type: 'bookmarks', items };
   }
@@ -532,39 +730,20 @@ class AppUI {
 
     // Bookmarks (all / tv / movie filters)
     const items = result.items || [];
-    const extraWl = result.extraWatchlist || [];
 
-    if (!items.length && !extraWl.length) {
-      const filterLabels = { all: 'library', tv: 'TV series', movie: 'movies', tracked: 'tracked series' };
-      const label = filterLabels[this.activeFilter] || 'items';
-      list.innerHTML = `<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-title">No ${label}</div><div class="empty-desc">${this.activeFilter === 'tracked' ? 'Bookmark a TV series to track it' : 'Click + Add to get started'}</div></div>`;
+    if (!items.length) {
+      const tab = this._activeTab || 'bookmarks';
+      const labels = { bookmarks: 'library', tracked: 'tracked series', history: 'history' };
+      const label = labels[tab] || 'items';
+      list.innerHTML = `<div class="empty-state"><div class="empty-icon">📚</div><div class="empty-title">No ${label}</div><div class="empty-desc">${tab === 'tracked' ? 'Bookmark a TV series to auto-track it' : 'Click + Add to get started'}</div></div>`;
       return;
     }
 
-    let html = '';
-
-    // Section: Bookmarks
-    if (items.length) {
-      if (extraWl.length && this.activeFilter === 'all') {
-        html += '<div style="font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;padding:4px 12px 2px">Library</div>';
-      }
-      html += items.map(bm => this._renderSidebarItem(bm, 'bookmark')).join('');
-    }
-
-    // Section: Watchlist-only (only when 'all' filter + no search query)
-    if (extraWl.length) {
-      html += '<div style="font-size:10px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;padding:8px 12px 2px">Tracked</div>';
-      html += extraWl.map(w => this._renderSidebarWatchlistItem(w)).join('');
-    }
-
-    list.innerHTML = html;
+    list.innerHTML = items.map(bm => this._renderSidebarItem(bm, 'bookmark')).join('');
 
     // Bind clicks
     list.querySelectorAll('.sb-item[data-bid]').forEach(row => {
       row.addEventListener('click', () => this._selectBookmark(row.dataset.bid));
-    });
-    list.querySelectorAll('.sb-item[data-wid]').forEach(row => {
-      row.addEventListener('click', () => this._selectWatchlistItem(row.dataset.wid));
     });
   }
 
@@ -577,7 +756,7 @@ class AppUI {
       ${thumb}
       <div class="sb-info">
         <div class="sb-name">${esc(bm.name)}</div>
-        <div class="sb-meta">${pos ? pos + ' · ' : ''}${typeIcon} ${esc(bm.category||'')}${bm.stars ? ' · ⭐' + bm.stars : ''}</div>
+        <div class="sb-meta">${pos ? pos + ' · ' : ''}${typeIcon} ${esc(bm.category||'')}</div>
       </div>
     </div>`;
   }
@@ -727,17 +906,26 @@ class AppUI {
     if (updates.length) {
       updatesCard.style.display = '';
       updatesList.innerHTML = updates.map(w => {
-        return `<div class="upcoming-item" data-wid="${w.watchId}" style="cursor:pointer">
+        return `<div class="upcoming-item" data-wid="${w.watchId}">
           <span class="sb-type-icon">◎</span>
           <div class="ui-text">
             <div class="ui-name">${esc(w.name)}</div>
-            <div class="ui-sub">${w.updateLabel || 'Update'}</div>
+            <div class="ui-sub">${w.updateLabel} · ${w.positionLabel}</div>
           </div>
-          <span class="ui-badge">NEW</span>
+          <button class="upcoming-dismiss" data-wid="${w.watchId}" title="Dismiss">✕</button>
         </div>`;
       }).join('');
       updatesList.querySelectorAll('.upcoming-item').forEach(row => {
-        row.addEventListener('click', () => this._selectWatchlistItem(row.dataset.wid));
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.upcoming-dismiss')) return;
+          this._selectWatchlistItem(row.dataset.wid);
+        });
+      });
+      updatesList.querySelectorAll('.upcoming-dismiss').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._wlDismissUpdate(btn.dataset.wid);
+        });
       });
     } else {
       updatesCard.style.display = 'none';
@@ -764,8 +952,6 @@ class AppUI {
     this.$('#detail-thumb').style.display = bm.imageUrl ? '' : 'none';
     this.$('#detail-title').textContent = bm.name;
     const metaParts = [];
-    if (bm.type === 'tv' && bm.lastSeason) metaParts.push(`S${String(bm.lastSeason).padStart(2,'0')}E${String(bm.lastEpisode).padStart(2,'0')}`);
-    if (bm.stars) metaParts.push(`⭐ ${bm.stars}`);
     if (bm.category) metaParts.push(bm.category);
     if (bm.type === 'movie') metaParts.push('🎬 Movie');
     else metaParts.push('📺 TV Series');
@@ -773,6 +959,9 @@ class AppUI {
 
     // Provider select
     this._renderProviderSelect(bm.schemaId);
+
+    // Ensure cycle button exists (created once during init)
+    this._ensureCycleButton();
 
     // Play button
     const playBtn = this.$('#detail-play-btn');
@@ -782,37 +971,47 @@ class AppUI {
 
     // TV vs Movie
     if (bm.type === 'tv') {
-      this.$('#episode-browser').style.display = '';
+      this.$('#detail-body').style.display = '';
       this.$('#movie-info').style.display = 'none';
 
-      // Fetch/load episodes
+      // Load episodes into the grid
+      this._stopAllCountdowns();
       await this._loadEpisodesForBookmark(bm);
 
-      // Edit position
+      // Edit position button
       const editBtn = this.$('#detail-edit-pos');
       const newEditBtn = editBtn.cloneNode(true);
       editBtn.parentNode.replaceChild(newEditBtn, editBtn);
+      newEditBtn.style.display = '';
       newEditBtn.addEventListener('click', () => this._openEditModal(bm));
 
       // Delete
       const delBtn = this.$('#detail-delete');
       const newDelBtn = delBtn.cloneNode(true);
       delBtn.parentNode.replaceChild(newDelBtn, delBtn);
+      newDelBtn.style.display = '';
+      newDelBtn.textContent = 'Delete';
       newDelBtn.addEventListener('click', () => this._deleteBookmark(bm.bookmarkId));
 
+      // Track/Untrack button
+      this._renderTrackButton(bm);
+
     } else {
-      this.$('#episode-browser').style.display = 'none';
+      this.$('#detail-body').style.display = 'none';
       this.$('#movie-info').style.display = '';
+
+      // Reset header buttons for movie view
+      this.$('#detail-edit-pos').style.display = 'none';
+      const delBtn = this.$('#detail-delete');
+      delBtn.style.display = '';
+      delBtn.textContent = 'Delete';
+      const newDelBtn = delBtn.cloneNode(true);
+      delBtn.parentNode.replaceChild(newDelBtn, delBtn);
+      newDelBtn.addEventListener('click', () => this._deleteBookmark(bm.bookmarkId));
 
       const poster = this.$('#movie-poster');
       poster.src = bm.imageUrl || '';
       poster.style.display = bm.imageUrl ? '' : 'none';
-
-      // Delete movie
-      const delBtn = this.$('#detail-delete-movie');
-      const newDelBtn = delBtn.cloneNode(true);
-      delBtn.parentNode.replaceChild(newDelBtn, delBtn);
-      newDelBtn.addEventListener('click', () => this._deleteBookmark(bm.bookmarkId));
     }
 
     // Bind provider change
@@ -866,26 +1065,34 @@ class AppUI {
     }
 
     // Episode browser
-    this.$('#episode-browser').style.display = '';
+    this.$('#detail-body').style.display = '';
     this.$('#movie-info').style.display = 'none';
 
     // Load episodes
+    this._stopAllCountdowns();
     await this._loadEpisodesForWatchlist(w);
 
-    // Delete (remove from watchlist)
+    // Delete (remove from watchlist) — the delete button is in the header row
     const delBtn = this.$('#detail-delete');
     const newDelBtn = delBtn.cloneNode(true);
     delBtn.parentNode.replaceChild(newDelBtn, delBtn);
-    newDelBtn.textContent = 'Stop Tracking';
+    newDelBtn.textContent = 'Remove';
     newDelBtn.addEventListener('click', () => this._wlRemove(w.watchId));
 
-    // Hide edit position for watchlist-only items
-    this.$('#detail-edit-pos').style.display = w.bookmarkId ? '' : 'none';
+    // Bookmark cross-link button
+    this._renderBookmarkButton(w);
 
-    // Bind provider change if there's a linked bookmark
+    // Edit position only for linked bookmarks
+    this.$('#detail-edit-pos').style.display = w.bookmarkId ? '' : 'none';
     if (w.bookmarkId) {
       const bm = this.bookmarks.find(b => b.bookmarkId === w.bookmarkId);
-      if (bm) this._bindProviderChange(bm);
+      if (bm) {
+        const editBtn = this.$('#detail-edit-pos');
+        const newEditBtn = editBtn.cloneNode(true);
+        editBtn.parentNode.replaceChild(newEditBtn, editBtn);
+        newEditBtn.addEventListener('click', () => this._openEditModal(bm));
+        this._bindProviderChange(bm);
+      }
     }
   }
 
@@ -894,6 +1101,103 @@ class AppUI {
     sel.innerHTML = this.schemas.map(s =>
       `<option value="${s.schemaId}"${s.schemaId === currentSchemaId ? ' selected' : ''}>${esc(s.name)}</option>`
     ).join('');
+  }
+
+  /** Show a Track/Untrack button for a bookmark in the detail header */
+  _renderTrackButton(bm) {
+    const wlItem = this.watchlist.find(w =>
+      (w.bookmarkId === bm.bookmarkId) || (w.imdb && w.imdb === bm.imdb)
+    );
+
+    const delBtn = this.$('#detail-delete');
+    // Remove any existing track/bookmark button
+    document.querySelectorAll('.track-bookmark-btn').forEach(b => b.remove());
+
+    if (wlItem) {
+      const btn = document.createElement('button');
+      btn.className = 'ghost-btn track-bookmark-btn';
+      btn.textContent = '◎ Tracked';
+      btn.title = 'View in Tracked tab';
+      btn.addEventListener('click', () => {
+        this._setTab('tracked');
+        this._selectWatchlistItem(wlItem.watchId);
+      });
+      if (delBtn) delBtn.parentNode.insertBefore(btn, delBtn);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'ghost-btn track-bookmark-btn';
+      btn.textContent = '◎ Track';
+      btn.title = 'Add to tracked series';
+      btn.addEventListener('click', async () => {
+        const showId = await this._getShowIdForBookmark(bm);
+        if (!showId) return;
+        const item = new WatchlistItem({
+          watchId: makeBookmarkId(), name: bm.name, imdb: bm.imdb,
+          showId, source: 'bookmark', bookmarkId: bm.bookmarkId,
+          imageUrl: bm.imageUrl || null,
+        });
+        this.watchlist.push(item);
+        await this.storage.saveWatchlist(this.watchlist, this.wlLastCheck);
+        this._refreshAll();
+        this._setTab('tracked');
+        this._selectWatchlistItem(item.watchId);
+      });
+      if (delBtn) delBtn.parentNode.insertBefore(btn, delBtn);
+    }
+  }
+
+  async _getShowIdForBookmark(bm) {
+    try {
+      const show = await findShow(bm.name, bm.imdb);
+      return show ? show.id : null;
+    } catch (_) { return null; }
+  }
+
+  /** Show a Bookmark button for a watchlist item in the detail header */
+  _renderBookmarkButton(w) {
+    const delBtn = this.$('#detail-delete');
+    document.querySelectorAll('.track-bookmark-btn').forEach(b => b.remove());
+
+    if (w.bookmarkId) {
+      const bm = this.bookmarks.find(b => b.bookmarkId === w.bookmarkId);
+      if (bm) {
+        const btn = document.createElement('button');
+        btn.className = 'ghost-btn track-bookmark-btn';
+        btn.textContent = '📚 View Bookmark';
+        btn.title = 'View in Bookmarks tab';
+        btn.addEventListener('click', () => {
+          this._setTab('bookmarks');
+          this._selectBookmark(bm.bookmarkId);
+        });
+        if (delBtn) delBtn.parentNode.insertBefore(btn, delBtn);
+        return;
+      }
+    }
+
+    // No linked bookmark — offer to create one
+    const btn = document.createElement('button');
+    btn.className = 'ghost-btn track-bookmark-btn';
+    btn.textContent = '📚 Bookmark';
+    btn.title = 'Create a bookmark for this series';
+    btn.addEventListener('click', async () => {
+      const schemaId = this.schemas.length ? this.schemas[0].schemaId : null;
+      if (!schemaId) return;
+      const bm = new Bookmark({
+        bookmarkId: makeBookmarkId(), name: w.name,
+        imdb: w.imdb || '', schemaId, type: 'tv',
+        lastSeason: w.lastKnownSeason || 1,
+        lastEpisode: w.lastKnownEpisode || 1,
+        imageUrl: w.imageUrl || null,
+      });
+      this.bookmarks.push(bm);
+      w.bookmarkId = bm.bookmarkId;
+      await this.storage.saveAll(this.schemas, this.bookmarks);
+      await this.storage.saveWatchlist(this.watchlist, this.wlLastCheck);
+      this._refreshAll();
+      this._setTab('bookmarks');
+      this._selectBookmark(bm.bookmarkId);
+    });
+    if (delBtn) delBtn.parentNode.insertBefore(btn, delBtn);
   }
 
   _bindProviderChange(bm) {
@@ -907,75 +1211,141 @@ class AppUI {
     });
   }
 
+  _cycleProvider(bm) {
+    if (!this.schemas.length) return;
+    const idx = this.schemas.findIndex(s => s.schemaId === bm.schemaId);
+    const next = (idx + 1) % this.schemas.length;
+    bm.schemaId = this.schemas[next].schemaId;
+    this.storage.saveAll(this.schemas, this.bookmarks);
+    this._renderProviderSelect(bm.schemaId);
+    this._renderItemList();
+    if (bm.type === 'tv') this._loadEpisodesForBookmark(bm);
+  }
+
+  _ensureCycleButton() {
+    if (document.querySelector('.provider-cycle-btn')) return;
+    const row = this.$('#detail-actions-row');
+    const providerSel = this.$('#detail-provider');
+    if (!row || !providerSel) return;
+    const btn = document.createElement('button');
+    btn.className = 'ghost-btn provider-cycle-btn';
+    btn.textContent = '↻';
+    btn.title = 'Try next provider';
+    btn.style.cssText = 'padding:5px 8px;font-size:12px;min-width:0';
+    providerSel.parentNode.insertBefore(btn, providerSel.nextSibling);
+    btn.addEventListener('click', () => {
+      const bm = this.selectedBookmark;
+      if (bm) this._cycleProvider(bm);
+    });
+  }
+
   /* ═════════════════════════════════════════════════════════════
      EPISODE LOADING
      ═════════════════════════════════════════════════════════════ */
   async _loadEpisodesForBookmark(bm) {
-    const container = this.$('#episode-browser');
-    container.innerHTML = '<div class="empty-hint">Loading episodes…</div>';
+    const container = this.$('#ep-grid');
+    if (!container) return;
+    const loadId = bm.bookmarkId;
+    this._activeLoadId = loadId;
 
-    let episodes, showInfo;
+    // Skeleton
+    container.innerHTML = '<div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text short"></div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">' +
+      Array.from({length:12}, () => '<span class="skeleton skeleton-ep"></span>').join('') + '</div>';
 
-    // Check cache
+    let episodes = [];
+    let showInfo = { name: bm.name };
+
+    // Check cache first
     const cached = this.availCache[bm.bookmarkId];
-    if (cached && cached.data && cached.data.episodes) {
+    if (cached && cached.data && cached.data.episodes && cached.data.episodes.length) {
       episodes = cached.data.episodes;
-      showInfo = { name: bm.name };
-      if (cached.data.showId) {
-        const wlCached = this.wlEpisodeCache.get(cached.data.showId);
-        if (wlCached?.showInfo) showInfo = wlCached.showInfo;
-      }
+      showInfo = { name: bm.name, showId: cached.data.showId };
+      const wlCached = cached.data.showId ? this.wlEpisodeCache.get(cached.data.showId) : null;
+      if (wlCached?.showInfo) showInfo = wlCached.showInfo;
     } else {
-      // Fetch fresh
-      const data = await checkAvailability(bm);
-      episodes = (data.episodes || []).map(ep => ({
-        season: ep.season, episode: ep.episode, name: ep.name || '', airdate: ep.airdate || null,
-      }));
-      showInfo = { name: data.showName || bm.name, showId: data.showId };
-
-      await this.storage.saveAvailability(bm.bookmarkId, { ...data, episodes });
-      this.availCache[bm.bookmarkId] = { ts: Date.now(), data: { ...data, episodes } };
-
-      // Fetch show info for countdown
-      if (data.showId) {
-        try {
-          const si = await wlFetchShowInfo(data.showId);
-          if (si) {
-            showInfo = si;
-            this.wlEpisodeCache.set(data.showId, { ts: Date.now(), episodes, showInfo: si });
+      // Fetch via TVmaze
+      try {
+        const data = await checkAvailability(bm);
+        if (this._activeLoadId !== loadId) return;
+        if (data && data.episodes && data.episodes.length) {
+          episodes = data.episodes.map(ep => ({
+            season: ep.season, episode: ep.episode, name: ep.name || '', airdate: ep.airdate || null,
+          }));
+          showInfo = { name: data.showName || bm.name, showId: data.showId };
+          this.availCache[bm.bookmarkId] = { ts: Date.now(), data: { ...data, episodes } };
+          this.storage.saveAvailability(bm.bookmarkId, { ...data, episodes }).catch(() => {});
+          // Fetch show info
+          if (data.showId) {
+            try {
+              const si = await wlFetchShowInfo(data.showId);
+              if (this._activeLoadId !== loadId) return;
+              if (si) { showInfo = si; this.wlEpisodeCache.set(data.showId, { ts: Date.now(), episodes, showInfo: si }); }
+            } catch (_) {}
           }
-        } catch (_) {}
+        } else {
+          // Bookmark search failed — fall back to linked watchlist showId
+          const wlItem = this.watchlist.find(w =>
+            (w.bookmarkId === bm.bookmarkId) || (w.imdb && w.imdb === bm.imdb)
+          );
+          if (wlItem && wlItem.showId) {
+            try {
+              const [wlEps, si] = await Promise.all([
+                wlFetchEpisodes(wlItem.showId),
+                wlFetchShowInfo(wlItem.showId),
+              ]);
+              if (this._activeLoadId !== loadId) return;
+              if (wlEps && wlEps.length) {
+                episodes = wlEps;
+                showInfo = si || { name: bm.name, showId: wlItem.showId };
+                this.wlEpisodeCache.set(wlItem.showId, { ts: Date.now(), episodes, showInfo });
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {
+        if (this._activeLoadId !== loadId) return;
+        container.innerHTML = '<div class="empty-hint">Failed to load episodes</div>';
+        return;
       }
     }
 
-    // Look up watchlist for merged data
+    // Merge next episode from watchlist
     const wlItem = this.watchlist.find(w =>
-      (w.imdb && w.imdb === bm.imdb) || (w.bookmarkId === bm.bookmarkId)
+      (w.bookmarkId === bm.bookmarkId) || (w.imdb && w.imdb === bm.imdb)
     );
-
     if (wlItem && wlItem.nextEpisodeAirdate) {
-      if (!showInfo) showInfo = { name: bm.name };
       showInfo.nextEpisode = {
-        season: wlItem.lastKnownSeason,
-        episode: wlItem.lastKnownEpisode + 1,
-        name: wlItem.nextEpisodeInfo || '',
-        airdate: wlItem.nextEpisodeAirdate,
+        season: wlItem.lastKnownSeason, episode: wlItem.lastKnownEpisode + 1,
+        name: wlItem.nextEpisodeInfo || '', airdate: wlItem.nextEpisodeAirdate,
       };
     }
 
+    // Render
+    if (this._activeLoadId !== loadId) return;
     const schema = this.schemas.find(s => s.schemaId === bm.schemaId);
+    const imdb = bm.imdb || (wlItem && wlItem.imdb) || null;
+    const tmdbId = bm.tmdbId || null;
     this._renderEpisodeGrid(container, {
-      episodes, showInfo, imdb: bm.imdb, schema: schema || null,
+      episodes, showInfo, imdb, tmdbId, schema: schema || null,
       countdownId: `detail-${bm.bookmarkId}`,
     });
   }
 
   async _loadEpisodesForWatchlist(w) {
-    const container = this.$('#episode-browser');
-    container.innerHTML = '<div class="empty-hint">Loading episodes…</div>';
+    const container = this.$('#ep-grid');
+    if (!container) return;
 
-    let episodes, showInfo;
-    const cached = this.wlEpisodeCache.get(w.showId);
+    // Abort any previous load
+    const loadId = w.watchId;
+    this._activeLoadId = loadId;
+
+    // Skeleton loading
+    container.innerHTML = '<div class="skeleton skeleton-text"></div><div class="skeleton skeleton-text short"></div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:8px">' +
+      Array.from({length:12}, () => '<span class="skeleton skeleton-ep"></span>').join('') + '</div>';
+
+    try {
+      let episodes, showInfo;
+      const cached = this.wlEpisodeCache.get(w.showId);
 
     if (cached && (Date.now() - cached.ts) < 600000 && cached.episodes && cached.showInfo) {
       episodes = cached.episodes;
@@ -986,6 +1356,7 @@ class AppUI {
           wlFetchEpisodes(w.showId),
           wlFetchShowInfo(w.showId),
         ]);
+        if (this._activeLoadId !== loadId) return; // aborted
         episodes = epData;
         showInfo = si;
         this.wlEpisodeCache.set(w.showId, { ts: Date.now(), episodes, showInfo });
@@ -1006,19 +1377,29 @@ class AppUI {
 
     const schema = this.schemas.length ? this.schemas[0] : null;
     const imdb = showInfo?.imdb || w.imdb || null;
+    const linkedBm = w.bookmarkId ? this.bookmarks.find(b => b.bookmarkId === w.bookmarkId) : null;
+    const tmdbId = (linkedBm && linkedBm.tmdbId) || null;
 
     this._renderEpisodeGrid(container, {
-      episodes, showInfo: showInfo || { name: w.name }, imdb, schema,
+      episodes, showInfo: showInfo || { name: w.name }, imdb, tmdbId, schema,
       countdownId: `detail-wl-${w.watchId}`,
     });
+    } catch (e) {
+      container.innerHTML = '<div class="empty-hint">Error: ' + (e.message || String(e)).slice(0, 80) + '</div>';
+    }
   }
 
   /* ═════════════════════════════════════════════════════════════
      EPISODE GRID RENDERER
      ═════════════════════════════════════════════════════════════ */
   _renderEpisodeGrid(container, opts) {
-    const { episodes, showInfo, imdb, schema, countdownId } = opts;
+    const { episodes, showInfo, imdb, tmdbId, schema, countdownId } = opts;
+    if (!container) return;
     if (!episodes || !episodes.length) {
+      const cd = this.$('#ep-countdown');
+      if (cd) cd.style.display = 'none';
+      const rs = this.$('#rail-stats');
+      if (rs) rs.innerHTML = '';
       container.innerHTML = '<div class="empty-hint">No episodes found</div>';
       return;
     }
@@ -1045,27 +1426,72 @@ class AppUI {
     const buildUrl = (season, episode) => {
       if (!imdb || !schema) return '#';
       return schema.buildUrl({
-        imdb, tmdbId: null, type: 'tv',
+        imdb, tmdbId: tmdbId || null, type: 'tv',
         lastSeason: season, lastEpisode: episode,
       }) || '#';
     };
 
-    let html = '';
-
-    // Countdown
-    if (nextEp) {
-      html += `<div class="ep-countdown" id="countdown-box-${countdownId}">
-        <div class="cd-label">S${String(nextEp.season).padStart(2,'0')}E${String(nextEp.episode).padStart(2,'0')} · ${esc(nextEp.name || 'TBA')}</div>
-        <div class="cd-airdate">${nextEp.airdate || 'TBA'}</div>
-        <div class="cd-timer" id="cd-timer-${countdownId}">--</div>
-      </div>`;
+    // ── Countdown (in rail) ──
+    const cdBox = this.$('#ep-countdown');
+    if (cdBox) {
+      if (nextEp) {
+        cdBox.style.display = '';
+        const cdLabel = this.$('#cd-label');
+        const cdAir = this.$('#cd-airdate');
+        const cdTimer = this.$('#cd-timer');
+        if (cdLabel) cdLabel.textContent = `S${String(nextEp.season).padStart(2,'0')}E${String(nextEp.episode).padStart(2,'0')} · ${nextEp.name || 'TBA'}`;
+        if (cdAir) cdAir.textContent = nextEp.airdate || 'TBA';
+        if (cdTimer) cdTimer.id = `cd-timer-${countdownId}`;
+      } else {
+        cdBox.style.display = 'none';
+      }
     }
 
-    // Header
-    html += '<div class="ep-header">';
-    html += `<span class="ep-show-name" id="ep-show-name">${esc(showInfo?.name || '')}</span>`;
-    html += `<span class="ep-count" id="ep-count">${episodes.length} episodes</span>`;
-    html += '</div>';
+    // ── Rail stats ──
+    const watchingEp = (() => {
+      for (const h of this.history) {
+        if (h.imdb === imdb && h.type === 'tv' && h.status === 'watching' && h.season && h.episode) {
+          return h;
+        }
+      }
+      return null;
+    })();
+    const wep = watchingEp;
+
+    const rs = this.$('#rail-stats');
+    if (rs) {
+      rs.innerHTML = wep
+        ? `<div class="rail-stat"><span>Watching</span><span class="rail-stat-val">S${String(wep.season).padStart(2,'0')}E${String(wep.episode).padStart(2,'0')}</span></div>`
+          + `<div class="rail-stat"><span>Total</span><span class="rail-stat-val">${episodes.length} episodes</span></div>`
+          + `<div class="rail-stat"><span>Seasons</span><span class="rail-stat-val">${new Set(episodes.map(e=>e.season)).size}</span></div>`
+          + (showInfo?.status ? `<div class="rail-stat"><span>Status</span><span class="rail-stat-val">${esc(showInfo.status)}</span></div>` : '')
+        : `<div class="rail-stat"><span>Total</span><span class="rail-stat-val">${episodes.length} episodes</span></div>`
+          + `<div class="rail-stat"><span>Seasons</span><span class="rail-stat-val">${new Set(episodes.map(e=>e.season)).size}</span></div>`
+          + (showInfo?.status ? `<div class="rail-stat"><span>Status</span><span class="rail-stat-val">${esc(showInfo.status)}</span></div>` : '');
+    }
+
+    // ── Episode grid (accordion) ──
+    // Populate header
+    const epShowName = this.$('#ep-show-name');
+    const epCount = this.$('#ep-count');
+    if (epShowName) epShowName.textContent = showInfo?.name || '';
+    if (epCount) epCount.textContent = `${episodes.length} episodes`;
+
+    // Find the "active" season: one with a watching episode, or the highest season
+    let activeSeason = null;
+    if (wep) {
+      activeSeason = wep.season;
+      // Verify this season actually exists in the fetched episodes
+      const seasonExists = episodes.some(ep => ep.season === activeSeason);
+      if (!seasonExists) activeSeason = null;
+    }
+    if (!activeSeason) {
+      let bestSeason = 0;
+      for (const ep of episodes) {
+        if (ep.season > bestSeason) bestSeason = ep.season;
+      }
+      activeSeason = bestSeason || 1;
+    }
 
     // Group by season
     const bySeason = new Map();
@@ -1074,10 +1500,15 @@ class AppUI {
       bySeason.get(ep.season).push(ep);
     }
 
-    html += '<div class="ep-grid">';
-    for (const [season, eps] of [...bySeason.entries()].sort((a, b) => a - b)) {
+    const seasonEntries = [...bySeason.entries()].sort((a, b) => b[0] - a[0]); // newest first
+
+    let gridHtml = '';
+    for (const [season, eps] of seasonEntries) {
       const sorted = eps.sort((a, b) => a.episode - b.episode);
-      html += `<div><div class="ep-season-label">Season ${season}</div><div class="ep-season-eps">`;
+      const isActive = season === activeSeason;
+      gridHtml += `<div class="ep-season-group" data-season="${season}">`;
+      gridHtml += `<div class="ep-season-label${isActive ? '' : ' collapsed'}" data-season="${season}">Season ${season} <span class="season-ep-count">(${sorted.length} ep)</span></div>`;
+      gridHtml += `<div class="ep-season-eps"${isActive ? '' : ' style="display:none"'}>`;
 
       for (const ep of sorted) {
         let isAired, isNext, isFuture;
@@ -1106,23 +1537,43 @@ class AppUI {
 
         if (isAired) {
           const epUrl = buildUrl(season, ep.episode);
-          html += `<a class="${epClass}" href="${esc(epUrl)}" target="_blank" title="${title}" data-ep-url="${esc(epUrl)}">${ep.episode}</a>`;
+          gridHtml += `<a class="${epClass}" href="${esc(epUrl)}" target="_blank" title="${title}" data-ep-url="${esc(epUrl)}">${ep.episode}</a>`;
         } else {
-          html += `<span class="${epClass}" title="${title}">${ep.episode}</span>`;
+          gridHtml += `<span class="${epClass}" title="${title}">${ep.episode}</span>`;
         }
       }
-      html += '</div></div>';
+      gridHtml += '</div></div>';
     }
-    html += '</div>';
 
-    container.innerHTML = html;
+    container.innerHTML = gridHtml;
 
-    // Intercept episode clicks to open in embed window
+    // Bind accordion clicks
+    container.querySelectorAll('.ep-season-label').forEach(label => {
+      label.addEventListener('click', () => {
+        const season = label.dataset.season;
+        const epsRow = label.nextElementSibling;
+        const isCollapsed = label.classList.contains('collapsed');
+        if (isCollapsed) {
+          label.classList.remove('collapsed');
+          epsRow.style.display = '';
+        } else {
+          label.classList.add('collapsed');
+          epsRow.style.display = 'none';
+        }
+      });
+    });
+
+    // Intercept episode clicks
     container.querySelectorAll('a.ep-aired').forEach(link => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
         const url = link.dataset.epUrl || link.getAttribute('href');
-        if (url && url !== '#' && window.wtAPI) window.wtAPI.openEmbed(url);
+        if (!url || url === '#' || url.includes('undefined') || url.includes('null')) return;
+        if (window.wtAPI) {
+          window.wtAPI.openEmbed(url);
+        } else {
+          window.open(url, '_blank');
+        }
       });
     });
 
@@ -1160,6 +1611,13 @@ class AppUI {
   _stopEpCountdown(countdownId) {
     const id = this._wlCountdownTimers.get(countdownId);
     if (id) { clearInterval(id); this._wlCountdownTimers.delete(countdownId); }
+  }
+
+  _stopAllCountdowns() {
+    for (const [key, id] of this._wlCountdownTimers) {
+      clearInterval(id);
+    }
+    this._wlCountdownTimers.clear();
   }
 
   _watchedEpisodeSet() {
@@ -1292,8 +1750,13 @@ class AppUI {
     if (!item) return;
     item.hasUpdate = false;
     item.updateType = null;
+    // Persist baseline so this update never re-triggers
     await this.storage.saveWatchlist(this.watchlist, this.wlLastCheck);
     this._renderItemList();
+    if (this.activeFilter === 'tracked' || this._activeTab === 'tracked') {
+      this._renderItemList();
+    }
+    this._renderDashboard();
     if (this.selectedWatchlistItem?.watchId === watchId) this._renderWatchlistDetail(item);
   }
 
@@ -1337,14 +1800,16 @@ class AppUI {
     });
   }
 
-  _openAddModal() {
-    this._addMode = 'bookmark';
-    this.$$('.modal-tab').forEach(t => t.classList.toggle('active', t.dataset.addMode === 'bookmark'));
+  _openAddModal(mode) {
+    this._addMode = mode || ((this._activeTab === 'tracked') ? 'track' : 'bookmark');
+    this.$$('.modal-tab').forEach(t => t.classList.toggle('active', t.dataset.addMode === this._addMode));
     this._resetAddForm();
     this.$('#add-modal').style.display = '';
     const input = this.$('#add-search');
     if (input) {
-      input.placeholder = 'Search IMDB (e.g. Breaking Bad)…';
+      input.placeholder = this._addMode === 'track'
+        ? 'Search TVmaze (e.g. Severance)…'
+        : 'Search IMDB (e.g. Breaking Bad)…';
       input.focus();
     }
   }
@@ -1469,13 +1934,12 @@ class AppUI {
       const badge = type === 'movie' ? '🎬' : '📺';
       const title = esc(it.l || 'Unknown');
       const imageUrl = it.i?.imageUrl || null;
-      const stars = esc(it.s || '');
       const cat = esc(it.q || '');
-      return `<div class="search-result-item" data-imdb="${esc(it.id)}" data-title="${title}" data-type="${type}" data-image="${imageUrl ? esc(imageUrl) : ''}" data-stars="${stars}" data-cat="${cat}">
+      return `<div class="search-result-item" data-imdb="${esc(it.id)}" data-title="${title}" data-type="${type}" data-image="${imageUrl ? esc(imageUrl) : ''}" data-stars="${esc(it.s||'')}" data-cat="${cat}">
         ${imageUrl ? `<img src="${esc(imageUrl)}" class="sr-thumb" onerror="this.style.display='none'" loading="lazy">` : ''}
         <div class="sr-info">
           <div class="sr-title">${badge} ${title} ${it.y?'('+it.y+')':''}</div>
-          ${stars ? '<div class="sr-meta">' + stars + (cat ? ' · ' + cat : '') + '</div>' : ''}
+          ${cat ? '<div class="sr-meta">' + cat + '</div>' : ''}
         </div>
       </div>`;
     }).join('');
@@ -1572,7 +2036,7 @@ class AppUI {
   }
 
   /* ═════════════════════════════════════════════════════════════
-     EDIT POSITION MODAL
+     EDIT MODAL (position + watched episode toggles)
      ═════════════════════════════════════════════════════════════ */
   _bindEditModal() {
     this.$('#edit-modal-close')?.addEventListener('click', () => this._closeEditModal());
@@ -1584,18 +2048,129 @@ class AppUI {
     });
   }
 
-  _openEditModal(bm) {
+  async _openEditModal(bm) {
     this._editingBookmark = bm;
+    this._editWatchedSet = new Set(); // temporary toggle state: "season|episode" keys
     this.$('#edit-hint').textContent = bm.name;
     this.$('#edit-season').value = bm.lastSeason || 1;
     this.$('#edit-episode').value = bm.lastEpisode || 1;
     this.$('#edit-modal').style.display = '';
     this.$('#edit-season').focus();
+
+    // Load episodes and pre-populate watched state from history
+    await this._loadEditEpisodes(bm);
   }
 
   _closeEditModal() {
     this.$('#edit-modal').style.display = 'none';
     this._editingBookmark = null;
+    this._editWatchedSet = null;
+  }
+
+  async _loadEditEpisodes(bm) {
+    const grid = this.$('#edit-ep-grid');
+    grid.innerHTML = '<div class="empty-hint">Loading episodes…</div>';
+
+    let episodes = [];
+    // Try cache first
+    const cached = this.availCache[bm.bookmarkId];
+    if (cached && cached.data && cached.data.episodes) {
+      episodes = cached.data.episodes;
+    } else {
+      try {
+        const data = await checkAvailability(bm);
+        episodes = (data.episodes || []).map(ep => ({
+          season: ep.season, episode: ep.episode, name: ep.name || '',
+        }));
+      } catch (_) {
+        grid.innerHTML = '<div class="empty-hint">Failed to load episodes</div>';
+        return;
+      }
+    }
+
+    if (!episodes.length) {
+      grid.innerHTML = '<div class="empty-hint">No episodes found</div>';
+      return;
+    }
+
+    // Pre-populate watched set from history
+    for (const h of this.history) {
+      if (h.imdb === bm.imdb && h.type === 'tv' && h.season && h.episode) {
+        // Consider it watched if status is 'watched' or if it exists in history at all
+        if (h.status !== 'watching') {
+          this._editWatchedSet.add(`${h.season}|${h.episode}`);
+        }
+      }
+    }
+
+    this._renderEditEpisodes(episodes);
+  }
+
+  _renderEditEpisodes(episodes) {
+    const grid = this.$('#edit-ep-grid');
+    const bySeason = new Map();
+    for (const ep of episodes) {
+      if (!bySeason.has(ep.season)) bySeason.set(ep.season, []);
+      bySeason.get(ep.season).push(ep);
+    }
+
+    const entries = [...bySeason.entries()].sort((a, b) => b[0] - a[0]); // newest first
+    let html = '';
+
+    for (const [season, eps] of entries) {
+      const sorted = eps.sort((a, b) => a.episode - b.episode);
+      html += `<div class="edit-ep-season-group">`;
+      html += `<div class="edit-ep-season-label" data-season="${season}">Season ${season}</div>`;
+      html += `<div class="edit-ep-season-eps">`;
+      for (const ep of sorted) {
+        const key = `${season}|${ep.episode}`;
+        const on = this._editWatchedSet.has(key);
+        html += `<span class="edit-ep-btn${on ? ' on' : ''}" data-key="${key}" title="S${String(season).padStart(2,'0')}E${String(ep.episode).padStart(2,'0')}">${ep.episode}</span>`;
+      }
+      html += `</div></div>`;
+    }
+
+    grid.innerHTML = html;
+
+    // Bind episode clicks
+    grid.querySelectorAll('.edit-ep-btn').forEach(btn => {
+      btn.addEventListener('click', () => this._toggleEditEpisode(btn));
+    });
+
+    // Bind season label clicks
+    grid.querySelectorAll('.edit-ep-season-label').forEach(label => {
+      label.addEventListener('click', () => this._toggleEditSeason(label.dataset.season, label));
+    });
+  }
+
+  _toggleEditEpisode(btn) {
+    const key = btn.dataset.key;
+    if (this._editWatchedSet.has(key)) {
+      this._editWatchedSet.delete(key);
+      btn.classList.remove('on');
+    } else {
+      this._editWatchedSet.add(key);
+      btn.classList.add('on');
+    }
+  }
+
+  _toggleEditSeason(_season, label) {
+    const buttons = label.nextElementSibling.querySelectorAll('.edit-ep-btn');
+    // Determine if most are off (toggle ON) or most are on (toggle OFF)
+    let onCount = 0;
+    buttons.forEach(b => { if (b.classList.contains('on')) onCount++; });
+    const turnOn = onCount < buttons.length / 2;
+
+    buttons.forEach(btn => {
+      const key = btn.dataset.key;
+      if (turnOn) {
+        this._editWatchedSet.add(key);
+        btn.classList.add('on');
+      } else {
+        this._editWatchedSet.delete(key);
+        btn.classList.remove('on');
+      }
+    });
   }
 
   async _saveEditPosition() {
@@ -1606,6 +2181,52 @@ class AppUI {
     bm.lastSeason = ns;
     bm.lastEpisode = ne;
     await this.storage.saveAll(this.schemas, this.bookmarks);
+
+    // Persist watched episode toggles to history
+    if (this._editWatchedSet) {
+      const { vidsrc_history: stored } = await chrome.storage.local.get({ vidsrc_history: [] });
+      let history = stored || [];
+      const now = Date.now();
+
+      // Remove existing watched entries for this show (keep the 'watching' one)
+      history = history.filter(h => {
+        if (h.imdb !== bm.imdb || h.type !== 'tv') return true;
+        // Keep if it's the current watching position
+        if (h.season === ns && h.episode === ne && h.status === 'watching') return true;
+        return false;
+      });
+
+      // Add entries for all toggled-on episodes
+      for (const key of this._editWatchedSet) {
+        const [s, e] = key.split('|').map(Number);
+        // Skip if this is the watching position (handled separately)
+        if (s === ns && e === ne) continue;
+        history.push({
+          historyId: now.toString(36) + Math.random().toString(36).slice(2, 6),
+          imdb: bm.imdb, name: bm.name, type: 'tv',
+          imageUrl: bm.imageUrl || null,
+          season: s, episode: e, watchedAt: now, status: 'watched',
+        });
+      }
+
+      // Ensure watching entry exists at the current position
+      const hasWatching = history.some(h =>
+        h.imdb === bm.imdb && h.season === ns && h.episode === ne && h.status === 'watching'
+      );
+      if (!hasWatching) {
+        history.push({
+          historyId: now.toString(36) + Math.random().toString(36).slice(2, 6),
+          imdb: bm.imdb, name: bm.name, type: 'tv',
+          imageUrl: bm.imageUrl || null,
+          season: ns, episode: ne, watchedAt: now, status: 'watching',
+        });
+      }
+
+      if (history.length > 2000) history.length = 2000;
+      await chrome.storage.local.set({ vidsrc_history: history });
+      this.history = history;
+    }
+
     this._closeEditModal();
     this._refreshAll();
   }
@@ -1659,22 +2280,18 @@ class AppUI {
     if (!window.wtAPI) return;
 
     window.wtAPI.onMenuAction((action) => {
-      if (action === 'new-bookmark') this._openAddModal();
+      if (action === 'new-bookmark') this._openAddModal('bookmark');
       else if (action === 'new-watchlist') {
-        this._setFilter('tracked');
-        this._openAddModal();
+        this._setTab('tracked');
+        this._openAddModal('track');
       }
     });
 
     window.wtAPI.onNavigateTab((tab) => {
-      const filterMap = {
-        schemas: 'all',
-        bookmarks: 'all',
-        watchlist: 'tracked',
-        history: 'history',
-      };
-      const filter = filterMap[tab] || 'all';
-      this._setFilter(filter);
+      // Map old menu tab names to new system
+      const tabMap = { bookmarks: 'bookmarks', watchlist: 'tracked', history: 'history' };
+      const mappedTab = tabMap[tab] || 'bookmarks';
+      this._setTab(mappedTab);
     });
 
     window.wtAPI.onDataImported?.(async () => {
@@ -1683,34 +2300,122 @@ class AppUI {
   }
 
   /* ═════════════════════════════════════════════════════════════
-     KEYBOARD SHORTCUTS
+     KEYBOARD SHORTCUTS + SIDEBAR NAVIGATION
      ═════════════════════════════════════════════════════════════ */
   _bindKeyboard() {
     document.addEventListener('keydown', (e) => {
       const mod = e.ctrlKey || e.metaKey;
 
-      // Ctrl+F: focus search
+      // ⌘K / Ctrl+K → Command palette
+      if (mod && e.key === 'k') {
+        e.preventDefault();
+        this._openCommandPalette();
+        return;
+      }
+
+      // ⌘F / Ctrl+F → focus search
       if (mod && e.key === 'f') {
         e.preventDefault();
         this.$('#global-search')?.focus();
+        return;
       }
 
-      // Escape: close modals or deselect
-      if (e.key === 'Escape') {
-        if (this.$('#add-modal').style.display !== 'none') {
-          this._closeAddModal();
-          return;
-        }
-        if (this.$('#edit-modal').style.display !== 'none') {
-          this._closeEditModal();
-          return;
-        }
+      // Don't handle sidebar nav when modals are open or input focused
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) return;
+      if (this.$('#add-modal')?.style.display !== 'none') return;
+      if (this.$('#edit-modal')?.style.display !== 'none') return;
+      if (this.$('#cmd-overlay')?.style.display !== 'none') return;
+
+      // j/k or Arrow keys → navigate sidebar
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        this._sidebarMove(1);
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this._sidebarMove(-1);
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        this._sidebarActivate();
+      } else if (e.key === 'Escape') {
         // Deselect
         this.selectedItem = null;
         this.selectedBookmark = null;
         this.selectedWatchlistItem = null;
-        this.$$('.sb-item').forEach(el => el.classList.remove('selected'));
+        this.$$('.sb-item').forEach(el => el.classList.remove('selected', 'key-focused'));
+        this._sidebarFocusIdx = -1;
         this._renderMainPanel();
+      }
+    });
+  }
+
+  _sidebarMove(dir) {
+    const items = [...this.$$('.sb-item')];
+    if (!items.length) return;
+    if (this._sidebarFocusIdx === undefined) this._sidebarFocusIdx = -1;
+
+    // Remove old focus
+    items.forEach(el => el.classList.remove('key-focused'));
+
+    this._sidebarFocusIdx = (this._sidebarFocusIdx + dir + items.length) % items.length;
+
+    // Add new focus
+    items[this._sidebarFocusIdx].classList.add('key-focused');
+    items[this._sidebarFocusIdx].scrollIntoView({ block: 'nearest' });
+  }
+
+  _sidebarActivate() {
+    if (this._sidebarFocusIdx === undefined || this._sidebarFocusIdx < 0) return;
+    const items = [...this.$$('.sb-item')];
+    if (this._sidebarFocusIdx >= items.length) return;
+    const el = items[this._sidebarFocusIdx];
+    if (el.dataset.bid) this._selectBookmark(el.dataset.bid);
+    else if (el.dataset.wid) this._selectWatchlistItem(el.dataset.wid);
+    else if (el.dataset.hid) this._selectHistoryItem(el.dataset.hid);
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     UI STATE PERSISTENCE
+     ═════════════════════════════════════════════════════════════ */
+  async _saveUIState() {
+    const sidebar = this.$('#sidebar');
+    const state = {
+      _sidebarCollapsed: sidebar?.classList.contains('collapsed') || false,
+      _tab: this._activeTab || 'bookmarks',
+      _filter: this.activeFilter || 'all',
+    };
+    await this.storage.saveFormState(state);
+  }
+
+  async _restoreUIState() {
+    try {
+      const state = await this.storage.loadFormState();
+      if (state._sidebarCollapsed) {
+        const sidebar = this.$('#sidebar');
+        sidebar?.classList.add('collapsed');
+      }
+      if (state._tab && ['bookmarks', 'tracked', 'history'].includes(state._tab)) {
+        this._setTab(state._tab);
+        if (state._filter && ['all', 'tv', 'movie'].includes(state._filter)) {
+          this._setFilter(state._filter);
+        }
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /* ═════════════════════════════════════════════════════════════
+     EMPTY SPACE CLICKS
+     ═════════════════════════════════════════════════════════════ */
+  _bindEmptySpaceClicks() {
+    // Click empty space in collapsed sidebar → expand
+    this.$('#sidebar')?.addEventListener('click', (e) => {
+      const sidebar = this.$('#sidebar');
+      if (!sidebar.classList.contains('collapsed')) return;
+      if (e.target === sidebar || e.target.classList.contains('sidebar-list')) {
+        sidebar.classList.remove('collapsed');
+        this._saveUIState();
       }
     });
   }

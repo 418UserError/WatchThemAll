@@ -6,6 +6,12 @@
 
 const TVMAZE_BASE = 'https://api.tvmaze.com';
 
+// ── In-memory caches (prevent rate limiting) ──────────────────
+const _findShowCache = new Map();   // key: imdbId → { ts, result }
+const _episodeCache = new Map();    // key: showId → { ts, episodes }
+const FIND_SHOW_TTL = 60 * 60 * 1000;      // 1 hour
+const EPISODE_CACHE_TTL = 30 * 60 * 1000;  // 30 minutes
+
 /** GET from TVmaze, return parsed JSON or null on failure. */
 async function tvGet(path) {
   try {
@@ -17,36 +23,67 @@ async function tvGet(path) {
 
 /**
  * Find a show on TVmaze by title, verify it matches the expected IMDB ID.
+ * Results cached by IMDB ID for 1 hour.
  * @param {string} title
  * @param {string} imdbId  — e.g. "tt0898266"
  * @returns {Promise<{id:number, name:string}|null>}
  */
 async function findShow(title, imdbId) {
-  // Try singlesearch first (best for exact titles)
-  const show = await tvGet(`/singlesearch/shows?q=${encodeURIComponent(title)}`);
-  if (show && show.externals && show.externals.imdb === imdbId) {
-    return { id: show.id, name: show.name };
+  // Check cache
+  const cached = _findShowCache.get(imdbId);
+  if (cached && (Date.now() - cached.ts) < FIND_SHOW_TTL) {
+    return cached.result;
   }
 
-  // Fallback: search endpoint (returns array)
-  const results = await tvGet(`/search/shows?q=${encodeURIComponent(title)}`);
-  if (results && Array.isArray(results)) {
-    for (const entry of results) {
-      const s = entry.show;
-      if (s && s.externals && s.externals.imdb === imdbId) {
-        return { id: s.id, name: s.name };
-      }
-    }
-    // No IMDB match — return first result with reasonable title similarity
-    if (results.length > 0 && results[0].show) {
-      const first = results[0].show;
-      const score = titleSimilarity(title, first.name);
-      if (score >= 0.7) {
-        return { id: first.id, name: first.name };
+  let result = null;
+
+  // Try singlesearch first (best for exact titles)
+  let show = await tvGet(`/singlesearch/shows?q=${encodeURIComponent(title)}`);
+  if (show && show.externals && show.externals.imdb === imdbId) {
+    result = { id: show.id, name: show.name };
+  }
+
+  // Fallback: try with shortened title (before colon or dash)
+  if (!result) {
+    const cutIdx = Math.min(
+      title.indexOf(':') > 0 ? title.indexOf(':') : Infinity,
+      title.indexOf(' - ') > 0 ? title.indexOf(' - ') : Infinity
+    );
+    if (cutIdx < Infinity) {
+      const shortTitle = title.substring(0, cutIdx).trim();
+      show = await tvGet(`/singlesearch/shows?q=${encodeURIComponent(shortTitle)}`);
+      if (show && show.externals && show.externals.imdb === imdbId) {
+        result = { id: show.id, name: show.name };
       }
     }
   }
-  return null;
+
+  // Fallback: search endpoint
+  if (!result) {
+    const results = await tvGet(`/search/shows?q=${encodeURIComponent(title)}`);
+    if (results && Array.isArray(results)) {
+      for (const entry of results) {
+        const s = entry.show;
+        if (s && s.externals && s.externals.imdb === imdbId) {
+          result = { id: s.id, name: s.name };
+          break;
+        }
+      }
+      if (!result && results.length > 0 && results[0].show) {
+        const first = results[0].show;
+        const score = titleSimilarity(title, first.name);
+        if (score >= 0.7) {
+          result = { id: first.id, name: first.name };
+        }
+      }
+    }
+  }
+
+  // Cache result (only cache successes — failures retry next time)
+  if (result) {
+    _findShowCache.set(imdbId, { ts: Date.now(), result });
+  }
+  return result;
 }
 
 function titleSimilarity(needle, haystack) {
@@ -61,14 +98,23 @@ function titleSimilarity(needle, haystack) {
  * @returns {Promise<Array<{season:number, episode:number, name:string}>>}
  */
 async function fetchEpisodes(showId) {
+  // Check cache
+  const cached = _episodeCache.get(showId);
+  if (cached && (Date.now() - cached.ts) < EPISODE_CACHE_TTL) {
+    return cached.episodes;
+  }
+
   const episodes = await tvGet(`/shows/${showId}/episodes`);
   if (!episodes || !Array.isArray(episodes)) return [];
-  return episodes.map(ep => ({
+  const result = episodes.map(ep => ({
     season: ep.season,
     episode: ep.number,
     name: ep.name || '',
     airdate: ep.airdate || null,
   })).sort((a, b) => a.season - b.season || a.episode - b.episode);
+
+  _episodeCache.set(showId, { ts: Date.now(), episodes: result });
+  return result;
 }
 
 /**

@@ -26,7 +26,7 @@ const APP_VERSION = app.getVersion();
 // Providers block requests with "Electron" in the User-Agent.
 // We spoof a standard Chrome UA so all API calls (health probes,
 // IMDB searches, TVmaze, TMDB, GitHub) look like regular Chrome.
-const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+const CHROME_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36';
 
 function setupBrowserIdentity() {
   const ses = session.defaultSession;
@@ -381,13 +381,29 @@ ipcMain.handle('open-embed', (_event, url) => {
       preload: path.join(__dirname, 'preload', 'embed-bridge.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
   embedWin.loadURL(url);
   embedWin.show();
   embedWin.focus();
+
+  // Handle load failures — show a reload prompt
+  embedWin.webContents.on('did-fail-load', (_event, errorCode, errorDesc, validatedURL) => {
+    if (errorCode === -3 || errorCode === -105 || errorCode === -106) return; // aborted/navigation, ignore
+    try {
+      embedWin.webContents.executeJavaScript(`
+        if (document.body && !document.getElementById('wta-error-overlay')) {
+          var d = document.createElement('div');
+          d.id = 'wta-error-overlay';
+          d.style.cssText = 'position:fixed;inset:0;z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:rgba(0,0,0,0.85);color:#fff;font-family:system-ui,sans-serif;font-size:14px;text-align:center;padding:20px';
+          d.innerHTML = '<div style="font-size:18px;font-weight:600">Failed to load player</div><div style="color:#999;font-size:12px">The embed provider may be unavailable</div><button onclick="location.reload()" style="padding:8px 24px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600">Retry</button><button onclick="window.close()" style="padding:8px 24px;background:transparent;color:#999;border:1px solid #444;border-radius:6px;cursor:pointer;font-size:13px">Close</button>';
+          document.body.appendChild(d);
+        }
+      `).catch(() => {});
+    } catch (_) {}
+  });
 
   // Block ALL popups from player windows — no ads, no popups.
   embedWin.webContents.setWindowOpenHandler(() => {

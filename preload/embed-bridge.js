@@ -1,9 +1,7 @@
 /**
  * WatchThemAll — Embed Bridge
- * Creates 4 edge navigation buttons. Survives SPA DOM replacement.
- * No storage, no history, no side effects. Just buttons.
+ * Creates 5 edge navigation buttons + reload. Survives SPA DOM replacement.
  */
-var ipcRenderer = require('electron').ipcRenderer;
 
 // ── CSS (injected once, survives DOM wipes via ID check) ──────
 function ensureCSS() {
@@ -25,14 +23,12 @@ function parseUrl() {
     return { id:id, s:isNaN(s)?1:s, e:isNaN(e)?1:e, mode:'query' };
   }
   var parts = url.pathname.split('/').filter(Boolean);
-  // IMDB path: /tv/tt1234567/1/2
   for (var i=0; i<parts.length; i++) {
     if (/^tt\d{7,}$/.test(parts[i]) && i+2<parts.length) {
       var sn=parseInt(parts[i+1]), en=parseInt(parts[i+2]);
       if (!isNaN(sn)&&!isNaN(en)) return { id:parts[i], s:sn, e:en, mode:'path', parts:parts, idx:i };
     }
   }
-  // TMDB path: /player/1418/1/2 (CinemaOS)
   for (var k=0; k<parts.length; k++) {
     if (/^\d+$/.test(parts[k]) && k+2<parts.length) {
       var tn=parseInt(parts[k+1]), un=parseInt(parts[k+2]);
@@ -86,10 +82,10 @@ function createButtons() {
   btn('wta-next-ep', 'Ep '+(e+1)+' \u25B6', {right:'12px',top:'50%',marginTop:'-17px'}, function(){ nav(s,e+1); });
   btn('wta-prev-s', '\u25B2 S'+(s>1?s-1:'?'), {top:'12px',left:'50%',transform:'translateX(-50%)'}, function(){ if(s>1)nav(s-1,1); });
   btn('wta-next-s', 'S'+(s+1)+' \u25BC', {bottom:'12px',left:'50%',transform:'translateX(-50%)'}, function(){ nav(s+1,1); });
+  btn('wta-reload', '\u21BB', {right:'12px',bottom:'12px',width:'34px',height:'34px',minWidth:'34px',borderRadius:'50%',fontSize:'16px',padding:'0'}, function(){ window.location.reload(); });
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────
-// DOMContentLoaded ensures body exists
 function boot() {
   createButtons();
   if (!document.getElementById('wta-prev-ep')) setTimeout(createButtons, 300);

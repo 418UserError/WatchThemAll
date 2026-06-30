@@ -221,7 +221,9 @@ class WatchlistItem {
   /** Update badge text. */
   get updateLabel() {
     if (!this.hasUpdate) return '';
-    return this.updateType === 'new_season' ? 'New Season!' : 'New Ep!';
+    if (this.updateType === 'new_series') return 'New Series';
+    if (this.updateType === 'new_season') return 'New Season';
+    return 'New Ep';
   }
 
   /** Next episode display text. */

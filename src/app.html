@@ -8,34 +8,6 @@
 </head>
 <body>
 
-<!-- ═══════════ DIAGNOSTIC PANEL (Ctrl+Shift+D to toggle) ══════ -->
-<div id="wta-diag" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:99999;background:rgba(0,0,0,0.92);color:#0f0;font:11px monospace;padding:20px;overflow-y:auto;white-space:pre-wrap"></div>
-<script>
-window.__diag = function(msg) {
-  var el = document.getElementById('wta-diag');
-  if (el) el.textContent += msg + '\n';
-  console.log('[WTA]', msg);
-};
-window.__diag_err = function(msg, e) {
-  var el = document.getElementById('wta-diag');
-  if (el) el.textContent += 'ERROR: ' + msg + ' — ' + (e&&e.message||e) + '\n';
-  console.error('[WTA]', msg, e);
-};
-document.addEventListener('DOMContentLoaded', function() {
-  __diag('DOM ready');
-  __diag('__wtaChrome exists: ' + (typeof window.__wtaChrome !== 'undefined'));
-  __diag('window.chrome exists: ' + (typeof window.chrome !== 'undefined'));
-  __diag('window.wtAPI exists: ' + (typeof window.wtAPI !== 'undefined'));
-});
-document.addEventListener('keydown', function(e) {
-  if (e.ctrlKey && e.shiftKey && e.key === 'D') {
-    var el = document.getElementById('wta-diag');
-    el.style.display = el.style.display === 'none' ? 'block' : 'none';
-    e.preventDefault();
-  }
-});
-</script>
-
 <!-- ═══════════ BRIDGE ALIAS ══════════════════════════════════ -->
 <script>
 if (window.__wtaChrome) window.chrome = window.__wtaChrome;
@@ -56,13 +28,13 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
     <div class="header-search-wrap">
       <svg class="search-icon-svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
       <input type="text" class="header-search" id="global-search" placeholder="Search library…" autocomplete="off">
+      <button class="search-clear" id="search-clear" style="display:none" title="Clear search">✕</button>
     </div>
     <div class="header-actions">
-      <button class="hdr-btn" id="hdr-check-all" title="Check all tracked series for updates">↻ Check All</button>
+      <button class="hdr-btn" id="hdr-check-all" title="Check all tracked series for updates"><span class="spin-icon">↻</span> Check All</button>
       <button class="hdr-btn" id="hdr-export" title="Export data">⤓ Export</button>
       <button class="hdr-btn" id="hdr-import" title="Import data">⤒ Import</button>
       <input type="file" id="import-file" accept=".json" style="display:none">
-      <button class="hdr-btn hdr-btn-accent" id="hdr-add" title="Add to library">+ Add</button>
     </div>
   </header>
 
@@ -71,12 +43,19 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
 
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
+      <button class="sidebar-collapse-btn" id="sidebar-collapse" title="Toggle sidebar"><span class="collapse-arrow">◀</span></button>
+      <div class="sidebar-tabs" id="sidebar-tabs">
+        <button class="tab-btn active" data-tab="bookmarks">Bookmarks</button>
+        <button class="tab-btn" data-tab="tracked">Tracked</button>
+        <button class="tab-btn" data-tab="history">History</button>
+      </div>
       <div class="sidebar-filters" id="sidebar-filters">
         <button class="filter-btn active" data-filter="all">All</button>
-        <button class="filter-btn" data-filter="tv">📺 TV</button>
-        <button class="filter-btn" data-filter="movie">🎬 Movies</button>
-        <button class="filter-btn" data-filter="tracked">◎ Tracked</button>
-        <button class="filter-btn" data-filter="history">◷ History</button>
+        <button class="filter-btn" data-filter="tv">TV</button>
+        <button class="filter-btn" data-filter="movie">Movies</button>
+      </div>
+      <div class="sidebar-list-header">
+        <button class="add-btn-inline" id="sidebar-add-btn" title="Add to library">+ Add</button>
       </div>
       <div class="sidebar-list" id="item-list">
         <div class="empty-state">
@@ -85,16 +64,14 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
           <div class="empty-desc">Add TV shows and movies to get started</div>
         </div>
       </div>
-      <div class="sidebar-footer">
-        <button class="add-btn" id="sidebar-add-btn">
-          <span>+</span> Add to Library
+      <div class="sidebar-footer" id="sidebar-footer">
+        <button class="providers-toggle-btn" id="providers-toggle">
+          <span class="providers-toggle-icon">◈</span>
+          <span class="providers-toggle-label">Providers</span>
+          <span class="providers-toggle-count" id="providers-count">5 active</span>
+          <span class="providers-toggle-arrow">▸</span>
         </button>
-        <div class="providers-mini" id="providers-mini">
-          <button class="providers-toggle" id="providers-toggle">
-            <span>◈</span> Providers <span class="providers-count" id="providers-count">5 active</span>
-          </button>
-          <div class="providers-list" id="providers-list" style="display:none"></div>
-        </div>
+        <div class="providers-dropdown" id="providers-dropdown" style="display:none"></div>
       </div>
     </aside>
 
@@ -148,6 +125,7 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
 
       <!-- Detail view (shown when item is selected) -->
       <div class="detail-view" id="detail-view" style="display:none">
+        <!-- Detail header: compact poster + info + play -->
         <div class="detail-header">
           <img class="detail-thumb" id="detail-thumb" src="" alt="" onerror="this.style.display='none'">
           <div class="detail-info">
@@ -156,35 +134,38 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
             <div class="detail-actions-row">
               <select class="detail-provider-select" id="detail-provider"></select>
               <button class="play-btn" id="detail-play-btn">▶ Play</button>
+              <button class="ghost-btn" id="detail-edit-pos">Edit</button>
+              <button class="ghost-btn danger" id="detail-delete">Delete</button>
             </div>
           </div>
         </div>
 
-        <!-- TV: Episode browser -->
-        <div class="episode-browser" id="episode-browser" style="display:none">
-          <div class="ep-countdown" id="ep-countdown" style="display:none">
-            <div class="cd-label" id="cd-label"></div>
-            <div class="cd-airdate" id="cd-airdate"></div>
-            <div class="cd-timer" id="cd-timer">--</div>
+        <!-- Two-column body -->
+        <div class="detail-body" id="detail-body">
+          <!-- Left rail: countdown + show info -->
+          <div class="detail-rail" id="detail-rail">
+            <div class="ep-countdown" id="ep-countdown" style="display:none">
+              <div class="cd-label" id="cd-label"></div>
+              <div class="cd-airdate" id="cd-airdate"></div>
+              <div class="cd-timer" id="cd-timer">--</div>
+            </div>
+            <div class="rail-stats" id="rail-stats"></div>
           </div>
-          <div class="ep-header">
-            <span class="ep-show-name" id="ep-show-name"></span>
-            <span class="ep-count" id="ep-count"></span>
-          </div>
-          <div class="ep-grid" id="ep-grid"></div>
-          <div class="detail-actions">
-            <button class="ghost-btn" id="detail-edit-pos">Edit Position</button>
-            <button class="ghost-btn danger" id="detail-delete">Delete</button>
+
+          <!-- Right: Episode accordion browser -->
+          <div class="episode-browser" id="episode-browser">
+            <div class="ep-header">
+              <span class="ep-show-name" id="ep-show-name"></span>
+              <span class="ep-count" id="ep-count"></span>
+            </div>
+            <div class="ep-grid" id="ep-grid"></div>
           </div>
         </div>
 
-        <!-- Movie: Simple info -->
+        <!-- Movie variant (shown instead of detail-body for movies) -->
         <div class="movie-info" id="movie-info" style="display:none">
           <div class="movie-poster-wrap">
             <img class="movie-poster" id="movie-poster" src="" alt="" onerror="this.style.display='none'">
-          </div>
-          <div class="detail-actions">
-            <button class="ghost-btn danger" id="detail-delete-movie">Delete</button>
           </div>
         </div>
       </div>
@@ -202,6 +183,27 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
       <span class="status-version">v1.0.0</span>
     </span>
   </footer>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     COMMAND PALETTE (⌘K)
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="cmd-overlay" id="cmd-overlay" style="display:none">
+  <div class="cmd-palette" id="cmd-palette">
+    <div class="cmd-input-wrap">
+      <svg class="cmd-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" class="cmd-input" id="cmd-input" placeholder="Search or type a command…" autocomplete="off" spellcheck="false">
+      <kbd class="cmd-kbd">esc</kbd>
+    </div>
+    <div class="cmd-results" id="cmd-results">
+      <div class="cmd-empty">Start typing to search your library</div>
+    </div>
+    <div class="cmd-footer">
+      <span><kbd>↑↓</kbd> Navigate</span>
+      <span><kbd>↵</kbd> Open</span>
+      <span><kbd>esc</kbd> Close</span>
+    </div>
+  </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
@@ -244,12 +246,12 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════════
-     EDIT POSITION MODAL (small inline editor for season/episode)
+     EDIT MODAL (position + watched episode toggles)
      ═══════════════════════════════════════════════════════════════ -->
 <div class="modal-overlay" id="edit-modal" style="display:none">
-  <div class="modal modal-sm">
+  <div class="modal modal-edit">
     <div class="modal-header">
-      <span class="modal-title">Edit Position</span>
+      <span class="modal-title">Edit</span>
       <button class="modal-close" id="edit-modal-close">✕</button>
     </div>
     <div class="modal-body">
@@ -257,6 +259,10 @@ if (window.__wtaAPI) window.wtAPI = window.__wtaAPI;
       <div class="key-row">
         <input type="number" class="modal-input half" id="edit-season" placeholder="Season" min="1">
         <input type="number" class="modal-input half" id="edit-episode" placeholder="Episode" min="1">
+      </div>
+      <div class="edit-ep-label">Watched Episodes <span class="edit-ep-legend"><span class="ep-dot-watched"></span> watched</span></div>
+      <div class="edit-ep-grid" id="edit-ep-grid">
+        <div class="empty-hint">Loading episodes…</div>
       </div>
     </div>
     <div class="modal-footer">

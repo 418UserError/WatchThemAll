@@ -115,7 +115,11 @@ async function wlCheckItem(item) {
 
     // Compare with last known state
     if (latest.season > 0) {
-      if (latest.season > item.lastKnownSeason) {
+      if (item.lastKnownSeason === 0) {
+        // First check — everything is new, but label it appropriately
+        item.hasUpdate = true;
+        item.updateType = 'new_series';
+      } else if (latest.season > item.lastKnownSeason) {
         item.hasUpdate = true;
         item.updateType = 'new_season';
       } else if (latest.season === item.lastKnownSeason && latest.episode > item.lastKnownEpisode) {
