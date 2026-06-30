@@ -117,7 +117,7 @@ function loadWindowState() {
       return JSON.parse(fs.readFileSync(WIN_STATE_FILE, 'utf-8'));
     }
   } catch (_) {}
-  return { width: 720, height: 750, x: undefined, y: undefined };
+  return { width: 1024, height: 680, x: undefined, y: undefined };
 }
 
 function saveWindowState(win) {
@@ -502,7 +502,7 @@ function createMainWindow() {
     height: state.height,
     x: state.x,
     y: state.y,
-    minWidth: 620,
+    minWidth: 780,
     minHeight: 550,
     title: APP_NAME,
     webPreferences: {
@@ -514,7 +514,7 @@ function createMainWindow() {
     },
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'src', 'popup.html'));
+  mainWindow.loadFile(path.join(__dirname, 'src', 'app.html'));
 
   // Block ALL popups from the main window — embed windows are
   // only opened via the open-embed IPC handler.
